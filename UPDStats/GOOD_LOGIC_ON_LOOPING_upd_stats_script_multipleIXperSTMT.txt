@@ -1,0 +1,72 @@
+DECLARE @JobName NVarChar(256);
+SET @JobName = 'Index Maint';
+
+DECLARE @Sats_DatabaseName NVarChar(128); 
+DECLARE @Sats_SchemaName NVarChar(128); 
+DECLARE @Sats_ObjectName NVarChar(128);
+DECLARE @Sats_IndexName NVarChar(128);
+
+DECLARE @Prev_Sats_DatabaseName NVarChar(128) = ''; 
+DECLARE @Prev_Sats_SchemaName NVarChar(128) = ''; 
+DECLARE @Prev_Sats_ObjectName NVarChar(128) = '';
+DECLARE @First_Index bit = 1;
+
+DECLARE @SqlCommand	NVarChar(4000);
+
+DECLARE Stats_Csr CURSOR FOR
+SELECT DISTINCT IDL.[DatabaseName]
+      ,IDL.[SchemaName]
+      ,IDL.[ObjectName]
+      ,IDL.[IndexName]	-- Upto SQL 2008, there is no partition level Stats. 
+					-- So, Update Stats for the entire Index, if at least a single part was Reorged.
+  FROM [DBAUtils].[dbo].[IndexDefragLog] IDL
+  WHERE IDL.StartTime > GETDATE()-20
+  AND IDL.[Action] = 'REORGANIZE'
+  AND IDL.[IsSuccessful] = 1
+  AND IDL.JOBNAME = @JobName
+  ORDER BY [DatabaseName], SchemaName, ObjectName, IndexName
+
+OPEN Stats_Csr;
+FETCH NEXT from Stats_Csr INTO @Sats_DatabaseName, @Sats_SchemaName, @Sats_ObjectName, @Sats_IndexName;
+
+WHILE @@FETCH_STATUS = 0
+BEGIN
+IF (@Sats_DatabaseName <> @Prev_Sats_DatabaseName 
+OR @Sats_SchemaName <> @Prev_Sats_SchemaName
+OR @Sats_ObjectName <> @Prev_Sats_ObjectName)
+BEGIN
+	IF @SqlCommand > ''
+	BEGIN
+		SET @SqlCommand = @SqlCommand + ');';
+		PRINT (@SqlCommand);
+		SET @SqlCommand = '';
+	END
+	SET @SqlCommand = 'use '+ @Sats_DatabaseName + '; ' + 'UPDATE STATISTICS ' + @Sats_SchemaName+'.'+ @Sats_ObjectName +' (';
+	SET @SqlCommand = @SqlCommand + @Sats_IndexName 
+END
+ELSE
+IF (@Sats_DatabaseName = @Prev_Sats_DatabaseName 
+AND @Sats_SchemaName = @Prev_Sats_SchemaName
+AND @Sats_ObjectName = @Prev_Sats_ObjectName)
+BEGIN
+--	IF @First_Index = 1
+--		SET @SqlCommand = @SqlCommand + @Sats_IndexName 
+--	ELSE
+		SET @SqlCommand = @SqlCommand + ',' + @Sats_IndexName 
+END
+
+SET @Prev_Sats_DatabaseName = @Sats_DatabaseName; 
+SET @Prev_Sats_SchemaName = @Sats_SchemaName;
+SET @Prev_Sats_ObjectName = @Sats_ObjectName;
+SET @First_Index = 0
+
+FETCH NEXT from Stats_Csr INTO @Sats_DatabaseName, @Sats_SchemaName, @Sats_ObjectName, @Sats_IndexName;
+END
+IF @SqlCommand > ''
+BEGIN
+	SET @SqlCommand = @SqlCommand + ');';
+	PRINT (@SqlCommand);
+	SET @SqlCommand = '';
+END
+CLOSE Stats_Csr;
+DEALLOCATE Stats_Csr;

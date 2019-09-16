@@ -1,0 +1,113 @@
+DECLARE @JobName nvarchar(128); 
+SET @JobName = 'Index Maint';
+SET NOCOUNT ON;
+
+DECLARE @DatabaseName varchar(128); 
+DECLARE @SchemaName varchar(128); 
+DECLARE @ObjectId int;
+DECLARE @ObjectName varchar(128);
+DECLARE @IndexId int;
+DECLARE @IndexName varchar(128);
+DECLARE @IsSuccessful bit;
+DECLARE @StartTime datetime;
+DECLARE @EndTime datetime;
+DECLARE @DurationSeconds int;
+DECLARE @ErrorMessage VARCHAR(1000);
+DECLARE @StatsUpdated bit;
+DECLARE @SqlCommand	nvarchar(4000);
+
+WHILE EXISTS (SELECT 1 FROM [dbo].[IndexDefragLog]
+			  WHERE [StartTime] > GETDATE()-20
+			  AND [Action] = 'REORGANIZE'
+			  AND [IsSuccessful] = 1
+			  AND [JOBNAME] = @JobName
+			  AND [StatsUpdated] IS NULL) -- StatsUpdated: null = not updated yet. 1 = succeeds. 0 = failure.
+BEGIN
+ SELECT DISTINCT TOP 1
+	 @JobName = [JobName]
+	,@DatabaseName = [DatabaseName]
+	,@SchemaName = [SchemaName]
+	,@ObjectId = [ObjectId]
+	,@ObjectName = [ObjectName]
+	,@IndexId = [IndexId]
+	,@IndexName = [IndexName]
+	-- Upto SQL 2008, there is no partition level Stats. So, we will update Stats for the entire Index, if at least a single part was Reorged.
+ FROM [dbo].[IndexDefragLog]
+ WHERE [StartTime] > GETDATE()-20
+ AND [Action] = 'REORGANIZE'
+ AND [IsSuccessful] = 1
+ AND [JOBNAME] = @JobName
+ AND [StatsUpdated] IS NULL
+ ORDER BY [JobName],[DatabaseName],[SchemaName],[ObjectId],[IndexId];
+ SET @SqlCommand = '';	
+ SET @SqlCommand = 'use '	+ @DatabaseName + ';' 
+	+ ' UPDATE STATISTICS '	+ @SchemaName+'.'	+ @ObjectName 	+' (' 	+ @IndexName 	+ ');';
+
+ PRINT (@SqlCommand);
+
+ BEGIN TRY
+ -- StatsUpdated on IndexDefragLog, IsSuccess on UpdateStatisticsLog INITIALIZED to 1
+	SET @StatsUpdated = 1;
+	SET @IsSuccessful = 1;
+    SET @ErrorMessage = '';
+	SET @StartTime  = GETDATE();
+	EXECUTE sp_executesql @SqlCommand;
+ END TRY
+ BEGIN CATCH
+-- StatsUpdated on IndexDefragLog, IsSuccess on UpdateStatisticsLog SET to 0 indicating a failure
+	SET @StatsUpdated = 0;
+	SET @IsSuccessful = 0;
+	SET @ErrorMessage = '';
+	SET @ErrorMessage = 'Error while updating STATS. ' 
+					  + '  Database: ' + @DatabaseName
+					  + '  Schema: ' + @SchemaName
+					  + '  Object: ' + @ObjectName
+					  + '  Index: ' + @IndexName
+					  + '  ErrorNumber: ' + CAST(ISNULL(ERROR_NUMBER(),'') AS NVarChar(20)) 
+					  + '  Message: ' + ISNULL(ERROR_MESSAGE(),'');
+	PRINT (@ErrorMessage);
+ END CATCH
+-- update IndexDefragLog
+ UPDATE [dbo].[IndexDefragLog]
+ SET [StatsUpdated] = @StatsUpdated
+ WHERE [JobName] = @JobName
+ AND [DatabaseName] = @DatabaseName
+ AND [SchemaName] = @SchemaName
+ AND [ObjectId] = @ObjectId        -- index id along with object id within a database can uniquely identify object/index
+ AND [ObjectName] = @ObjectName    -- schema, object/index names were not essential, however just leaving them as it is
+ AND [IndexId] = @IndexId
+ AND [IndexName] = @IndexName 
+ AND [StatsUpdated] IS NULL;
+
+-- insert into UpdateStatisticsLog
+	 SET @EndTime  = GETDATE();
+	 SET @DurationSeconds = DATEDIFF(SECOND,@StartTime,@EndTime);
+	 INSERT INTO [dbo].[UpdateStatisticsLog]
+           ([JobName]
+           ,[DatabaseName]
+           ,[SchemaName]
+           ,[ObjectId]
+           ,[ObjectName]
+           ,[IndexId]
+           ,[IndexName]
+           ,[StartTime]
+           ,[EndTime]
+           ,[DurationSeconds]
+           ,[SQLStatement]
+           ,[IsSuccessful]
+           ,[ErrorMessage])
+     VALUES
+           (@JobName
+           ,@DatabaseName
+           ,@SchemaName
+           ,@ObjectId
+           ,@ObjectName
+           ,@IndexId
+           ,@IndexName
+           ,@StartTime
+           ,@EndTime
+           ,@DurationSeconds
+           ,@SqlCommand
+           ,@IsSuccessful
+           ,@ErrorMessage);
+END;

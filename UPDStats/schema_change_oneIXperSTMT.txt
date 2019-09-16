@@ -1,0 +1,35 @@
+-- schema change required for new UPD STATS proc
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_PADDING ON
+GO
+
+ALTER TABLE [dbo].[IndexDefragLog]
+	ADD [REORGIxStatsUpdated] [bit] NULL; -- null means not applicable or no action taken yet. 1 would mean updated, 0 was attempted, but failed
+--GO
+
+
+CREATE TABLE [dbo].[UpdateStatisticsLog](
+	[UpdateStatisticsLogId] [int] IDENTITY(1,1) NOT NULL,
+	[JobName] [nvarchar](256) NOT NULL,
+	[DatabaseName] [varchar](128) NOT NULL,
+	[SchemaName] [varchar](128) NULL,
+	[ObjectId] [int] NOT NULL,
+	[ObjectName] [varchar](128) NOT NULL,
+	[IndexId] [int] NOT NULL,
+	[IndexName] [varchar](128) NULL,
+	[StartTime] [datetime] NOT NULL,
+	[EndTime] [datetime] NULL,
+	[DurationSeconds] [int] NULL,
+	[SQLStatement] [varchar](4000) NOT NULL,
+	[IsSuccessful] [bit] NULL,
+	[ErrorMessage] [varchar](1000) NULL,
+ CONSTRAINT [PK_UpdateStatisticsLog] PRIMARY KEY CLUSTERED 
+(
+	[UpdateStatisticsLogId] ASC
+)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+

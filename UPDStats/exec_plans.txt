@@ -1,0 +1,193 @@
+--2--manipulate data -------------------------------------------------------recurring exercise for this testing
+--add data
+use [TestUserDB]
+go
+set nocount on;
+declare @addRec int = 1000000;
+declare @iterate int = 1;
+
+while @iterate <= @addRec
+begin
+--	INSERT INTO [dbo].[t1] ([st_cd],[comments])  VALUES ('KY','with DECENT number of entries') -100,000
+--	INSERT INTO [dbo].[t1] ([st_cd],[comments])  VALUES ('RI','with SMALL number of entries') --100
+	INSERT INTO [dbo].[t1] ([st_cd],[comments])  VALUES ('TX','with LARGE number of entries') --1,000,000
+	if @iterate % 1000 = 0
+	 begin
+		print '# of rows inserted ' + cast (@iterate as varchar(20));
+		checkpoint;
+	 end
+	set @iterate = @iterate + 1;
+end
+--verify data
+select st_cd, count(*) as st_rec_count from dbo.t1 group by st_cd;
+
+--clear data
+/*
+truncate table dbo.t1;
+DBCC CHECKIDENT ('dbo.t1',RESEED, 0)
+select IDENT_CURRENT('dbo.t1') as current_identity_value;
+*/
+
+--3--test stats update and exec plan usage-------------------------------------recurring exercise for this testing
+--add 1,000,000 TX rows
+--add 100 RI rows
+-- start with 100,000 KY rows. update stats. get a scan
+--delete ky records to reduce to 100. exec. get a scan.
+--update stats. exec. get a seek
+--reverse order of testing shows the expected behavior
+
+--obtain stats info
+SELECT
+OBJECT_NAME([sp].[object_id]) AS "Table",
+[sp].[stats_id] AS "Statistic ID",
+[s].[name] AS "Statistic",
+[sp].[last_updated] AS "Last Updated",
+[sp].[rows],
+[sp].[rows_sampled],
+[sp].[unfiltered_rows],
+[sp].[modification_counter] AS "Modifications"
+FROM [sys].[stats] AS [s]
+OUTER APPLY sys.dm_db_stats_properties ([s].[object_id],[s].[stats_id]) AS [sp]
+WHERE [s].[object_id] = OBJECT_ID(N'dbo.t1');
+
+
+--execute SPs
+--update statistics dbo.t1
+exec dbo.sp_t1_write;
+exec dbo.sp_t1_select;
+
+
+
+--query plan cache
+
+SELECT 
+deqp.dbid ,
+deqp.objectid , 
+CAST(detqp.query_plan AS XML) AS singleStatementPlan ,
+deqp.query_plan AS batch_query_plan, deqs.query_plan_hash,
+--this won't actually work in all cases because nominal plans aren't
+-- cached, so you won't see a plan for waitfor if you uncomment it
+execText.text,
+CASE WHEN deqs.statement_start_offset = 0
+AND deqs.statement_end_offset = -1
+THEN '-- see objectText column--'
+ELSE '-- query --' + CHAR(13) + CHAR(10)
++ SUBSTRING(execText.text, deqs.statement_start_offset / 2,
+( ( CASE WHEN deqs.statement_end_offset = -1
+THEN DATALENGTH(execText.text)
+ELSE deqs.statement_end_offset
+END ) - deqs.statement_start_offset ) / 2)
+END AS queryText
+FROM sys.dm_exec_query_stats deqs
+CROSS APPLY sys.dm_exec_text_query_plan(deqs.plan_handle,
+deqs.statement_start_offset,
+deqs.statement_end_offset)
+AS detqp
+CROSS APPLY sys.dm_exec_query_plan(deqs.plan_handle) AS deqp
+CROSS APPLY sys.dm_exec_sql_text(deqs.plan_handle) AS execText
+WHERE deqp.objectid in (OBJECT_ID('sp1_t1', 'p'),OBJECT_ID('sp2_t1', 'p')) ;
+
+
+SELECT usecounts ,
+cacheobjtype ,
+objtype ,
+OBJECT_NAME(dest.objectid)
+FROM sys.dm_exec_cached_plans decp
+CROSS APPLY sys.dm_exec_sql_text(decp.plan_handle) AS dest
+WHERE dest.objectid in (OBJECT_ID('sp1_t1', 'p'),OBJECT_ID('sp2_t1', 'p')) 
+AND dest.dbid = DB_ID()
+ORDER BY usecounts DESC ;
+
+
+--1--logistics - craete objects-------------------------------------------------------1 time setup for this testing
+--create table
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_PADDING ON
+GO
+drop table dbo.t1;
+CREATE TABLE [dbo].[t1](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[st_cd] [char](2) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[comments] [varchar](80) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	recAddTimestamp datetime2 not null constraint df_recAddTimestamp default sysdatetime(),
+ CONSTRAINT [PK_t1] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = ON, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+SET ANSI_PADDING OFF
+GO
+SET ANSI_PADDING ON
+GO
+CREATE NONCLUSTERED INDEX [ix_t1_stcd] ON [dbo].[t1]
+(
+	[st_cd] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+SET ANSI_PADDING ON
+GO
+CREATE NONCLUSTERED INDEX [ix_t1_recAddTimestamp] ON [dbo].[t1]
+(
+	[recAddTimestamp] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+CREATE NONCLUSTERED INDEX [ix_t1_comments] ON [dbo].[t1]
+(
+	[comments] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+
+--create SP for testing plan usage
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+use [TestUserDB]
+go
+drop procedure [dbo].[sp_t1_write];
+go
+create procedure [dbo].[sp_t1_write]
+as 
+declare @curr_ident_value int;
+begin tran trn1
+SELECT TOP 100 [id],[comments]
+FROM [dbo].[t1];
+
+INSERT INTO [dbo].[t1]  ([comments])
+     VALUES ('delete me');
+select @curr_ident_value = IDENT_CURRENT('dbo.t1');
+
+UPDATE [dbo].[t1] SET [comments] = 'x' WHERE id = @curr_ident_value;
+
+DELETE FROM [dbo].[t1] WHERE ID = @curr_ident_value;
+commit tran trn1  
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+use [TestUserDB]
+go
+drop procedure [dbo].[sp_t1_select];
+go
+create procedure [dbo].[sp_t1_select]
+as 
+
+select comments from dbo.t1 where st_cd = 'hi'
+select comments from dbo.t1 where st_cd = 'ky'
+select comments from dbo.t1 where st_cd = 'ca'
+
+GO
+
+
+
+--X --trivial testing
+--a. every singleton query has its own exec plan
+--b. S/I/U/D do have an execution plan. 
+--bi. even insert has 'Clustered Index Insert' apart from just 'insert'operation. 
+--bii. update / delete have data search just as select, obviously.

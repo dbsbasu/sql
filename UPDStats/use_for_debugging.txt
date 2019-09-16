@@ -1,0 +1,25 @@
+-- remove one index taht was qualified for stats upd and test error capturing
+/*
+
+delete FROM [dbo].[UpdateStatsLog]
+UPDATE [dbo].[IndexDefragLog]
+SET StatsUpdated = null
+
+*/
+
+----------------------------------------
+
+DECLARE @JobName NVarChar(256);
+SET @JobName = 'Index Maint';
+SET NOCOUNT ON;
+
+SELECT * FROM [dbo].[IndexDefragLog]
+WHERE [StartTime] > GETDATE()-20
+AND [Action] = 'REORGANIZE'
+AND [IsSuccessful] = 1
+AND [JOBNAME] = @JobName
+ORDER BY [JobName],[DatabaseName],[SchemaName],[ObjectId],[IndexId];
+
+SELECT * FROM [dbo].[UpdateStatsLog]
+ORDER BY [JobName],[DatabaseName],[SchemaName],[ObjectId],[IndexId];
+
