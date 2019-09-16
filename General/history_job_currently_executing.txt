@@ -1,0 +1,9 @@
+select jact.job_id, job.name as job_name, jact.start_execution_date,  
+    ISNULL(last_executed_step_id,0)+1 as currently_executing_step_id, jstep.step_name
+from msdb.dbo.sysjobactivity jact 
+join msdb.dbo.sysjobs job on jact.job_id = job.job_id
+join msdb.dbo.sysjobsteps jstep on jact.job_id = jstep.job_id
+     and ISNULL(jact.last_executed_step_id,0)+1 = jstep.step_id
+where jact.session_id = (select top 1 ses.session_id from msdb.dbo.syssessions ses order by ses.agent_start_date desc)
+and jact.start_execution_date is not null
+and jact.stop_execution_date is null;

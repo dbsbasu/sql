@@ -1,0 +1,100 @@
+
+--------
+
+follow these steps to merge master into my own branch :
+
+git bash
+1. git checkout master
+2. git fetch
+3. git pull
+so that we have the latest from origin into local
+then 
+git checkout my branch
+
+now visual studio
+open the solution
+team explorer -> home -> branches -> right click master then click merge from... then merge from branch is master and into current branch as my branch
+click merge
+
+if conflicts, click merge. select if want to keep source or target. if want to keep both, check both boxes and click right arrow top left corner. finally cleck accept conflict. commit.
+
+
+back to git bash
+git push -u origin my branch
+so that merge branch is pushed to irigin
+
+
+--- done
+
+
+--------------------
+deploying ssis
+
+
+--  visual studio
+-> project -> convert deployment model -> next... next -> creates an .ispac file
+
+now deploy into ssis catalog by right clicking project and then deploy as project. path should to the one to .ispac file. server - ssis server. IMP remember to click connect beside the authentication as windows auth otherwise the next button will not be active. rest of the step is to click next. 
+
+finally when you refresh projects folder, you will see package there.
+
+
+--------------------------------
+------
+
+
+sql server 2017
+https://www.microsoft.com/en-us/sql-server/sql-server-downloads
+>> developer version
+ssms 17.9.1
+
+
+-------studio starts
+install visual studio (no data tools) + dacfx + ssdt
+
+while installing studio
+on workloads
+select: (1) .NET desktop development and (2) .NET Core cross-platform development 
+
+on individual components
+uncheck (1) SQL Server Data Tools, (2) SQL Server Express 2016 LocalDB, (3) SQL Server Native Client, (4) SQL Server Command Line Utilities, (5) SQL ADAL runtime, (6) Redgate SQL Search
+
+on installation locations
+Visual Studio IDE:     C:\Program Files (x86)\Microsoft Visual Studio\2017\Professional
+
+
+
+
+https://www.microsoft.com/en-us/download/confirmation.aspx?id=55114
+x64
+
+visual studio 2017 professional with add on ssdt
+https://docs.microsoft.com/en-us/sql/ssdt/download-sql-server-data-tools-ssdt?view=sql-server-2017
+
+
+-------studio
+
+
+git
+https://git-scm.com/book/en/v2/Getting-Started-Installing-Git
+https://github.com/Microsoft/Git-Credential-Manager-for-Windows/releases/tag/1.18.4.0
+
+select options:
+install git
+	Use Git from the Windows Command Prompt
+	Use the OpenSSL library
+	Checkout as-is, commit as-is
+	Use Windows' default console window
+	Enable file system caching
+		Enable Git Credential Manager
+
+sql prompt
+get an email that says “Activate your Redgate license.”
+Follow similar link (NOT THIS ONE, but from the email)… link...
+
+sql prompt
+sql search
+
+
+
+

@@ -1,0 +1,23 @@
+--data issue  STARTS 
+--converion into tinyint data type failing. that was the issue.  
+--first select tinyint data typed columns.
+
+SELECT  sc.Name 
+FROM    sys.columns sc 
+        INNER JOIN sys.types st ON st.system_type_id = sc.system_type_id
+WHERE   OBJECT_NAME(Object_ID) = 'table_name'
+        AND st.name IN ('tinyint')
+
+--then expand to bigint so that the conversion happend successfully. 
+
+ALTER TABLE table_name ALTER COLUMN tinyint_column_name bigINT NULL
+
+--and then select max value as below:
+
+SELECT  'SELECT '''+ sc.Name + ''' , MAX(CAST( '+ sc.Name + ' AS varchar(10))) FROM table_name where '+ sc.Name + ' is not null '
+FROM    sys.columns sc 
+        INNER JOIN sys.types st ON st.system_type_id = sc.system_type_id
+WHERE   OBJECT_NAME(Object_ID) = 'table_name'
+        AND st.name IN ('bigint') --('tinyint')
+
+--data issue  ENDS

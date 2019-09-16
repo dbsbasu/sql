@@ -1,0 +1,64 @@
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.usp_Standard_Error_Handling') AND type in (N'P', N'PC'))
+DROP PROCEDURE dbo.usp_Standard_Error_Handling;
+GO
+CREATE PROCEDURE dbo.usp_Standard_Error_Handling
+AS 
+BEGIN 
+SET NOCOUNT ON; SET XACT_ABORT ON; SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+--SQL 2012 and above --- use throw statement. SQL 2008 and below -- use raiserror statement
+
+BEGIN TRY
+IF EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'dbo.test_table1') AND type IN (N'U'))
+DROP TABLE dbo.test_table1;
+CREATE TABLE dbo.test_table1 (id tinyint NOT NULL UNIQUE CLUSTERED (id ASC), mynum tinyint NULL);
+
+--test case 0 : table dropped. object does not exist. system error condition meets whil etrying to truncate
+--DROP TABLE dbo.test_table1;
+
+TRUNCATE TABLE dbo.test_table1;
+INSERT INTO dbo.test_table1 (id,mynum) VALUES (1,10),(2,20);
+
+--test case 1.0 : try inserting a duplicate key. system error condition
+--INSERT INTO dbo.test_table1 (id, mynum) VALUES (5,30), (5,31); --> uncomment only this statement for testing
+
+--test case 1.1 : try inserting a negative number in tinyint. system error condition
+--INSERT INTO dbo.test_table1 (id, mynum) VALUES (3,-15); --> uncomment only this statement for testing
+
+--test case 2 : add specific value. force a failure to stop processing. user condition
+--INSERT INTO dbo.test_table1 (id,mynum) VALUES (10,100); --> uncomment only this statement for testing
+IF EXISTS (SELECT TOP(1) id FROM dbo.test_table1 WHERE mynum = 100)
+BEGIN
+--	;THROW 51000, 'table contains specific value. no need to continue. stop processing', 1;
+	RAISERROR('table contains specific value. no need to continue. stop processing',16,1);
+END
+
+--test case 3 : delete all records. force a failure to stop processing. user condition
+--DELETE FROM dbo.test_table1 WHERE id < 100; --> uncomment only this statement for testing
+IF NOT EXISTS (SELECT TOP(1) id FROM dbo.test_table1)
+BEGIN
+--	;THROW 52000, 'table is empty. no need to continue. stop processing', 1;
+	RAISERROR('table is empty. no need to continue. stop processing',16,1);
+END
+
+SELECT * FROM dbo.test_table1;
+END TRY
+BEGIN CATCH
+	PRINT
+          ' ErrorNumber = ' + CAST (ERROR_NUMBER() AS VARCHAR(100))
+        + ' ErrorSeverity ' + CAST (ERROR_SEVERITY() AS VARCHAR(100)) 
+        + ' ErrorState ' + CAST (ERROR_STATE() AS VARCHAR(100)) 
+        + ' ErrorProcedure ' + CAST (ERROR_PROCEDURE() AS VARCHAR(100)) 
+        + ' ErrorLine ' + CAST (ERROR_LINE() AS VARCHAR(100)) 
+        + ' ErrorMessage ' + CAST (ERROR_MESSAGE() AS VARCHAR(100))
+--		;THROW;
+
+    DECLARE @ErrorMessage NVARCHAR(1000), @ErrorSeverity INT, @ErrorState INT;  
+    SELECT @ErrorMessage = ERROR_MESSAGE(), @ErrorSeverity = ERROR_SEVERITY(), @ErrorState = ERROR_STATE();  
+    RAISERROR (@ErrorMessage, @ErrorSeverity, @ErrorState); 
+END CATCH
+END 
+GO
+
+--execute SP
+EXEC dbo.usp_Standard_Error_Handling
+

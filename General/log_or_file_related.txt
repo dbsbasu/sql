@@ -1,0 +1,258 @@
+-- tempdb tranlog full-- starts
+sp_helpfile
+ALTER DATABASE [tempdb] MODIFY FILE ( NAME = N'templog', SIZE = 10000000 KB )
+CHECKPOINT
+DBCC LOGINFO
+DBCC OPENTRAN
+
+kill tran that is using tempdb and then checkpoint
+
+-- tempdb tranlog full-- starts
+
+
+-- get db file names starts
+refer Tables_Cols_Index_FKs_RowCounts_Files
+
+
+--------------fg, logical and physical name changes/location change------
+--FG NAME CHANGE
+ALTER DATABASE my_SYSTEM MODIFY FILEGROUP [FG_Data1] NAME = [CONFIG]
+go
+--LOGICAL FILE NAME CHANGE
+alter database my_SYSTEM modify file (name = 'my_SYSTEM_Data1', newname = 'my_SYSTEM_CONFIG');
+GO
+--TAKE DATABASE OFFLINE in order to change physical name change
+USE [master]
+GO
+ALTER DATABASE my_SYSTEM SET SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+ALTER DATABASE my_SYSTEM SET OFFLINE
+go
+
+ALTER DATABASE my_SYSTEM SET OFFLINE
+go
+/*** -- RENAME FILE in OS -- ***/
+--ALTER DATABASE to reflect the NEW PHYSICAL FILE NAME
+ALTER DATABASE my_SYSTEM MODIFY FILE (NAME = my_SYSTEM_CONFIG, FILENAME = 'E:\SQLdrive2\my_SYSTEM_CONFIG.ndf');
+Go
+
+-- rename the file in OS, full-text catalog
+ALTER DATABASE my_SYSTEM 
+MODIFY FILE (NAME = dbfile, FILENAME = 'H:\sqldrive1\new_path_only');
+go
+
+--BRING DATABASE ONLINE
+ALTER DATABASE my_SYSTEM SET ONLINE
+go
+ALTER DATABASE my_SYSTEM SET MULTI_USER 
+GO
+
+
+--------------fg, logical and physical name changes/location change------
+
+-------------- resize log Begins------------
+use [mydb]
+go
+select * from sys.database_files
+where name = 'p_mydb_log'
+
+dbcc sqlperf (logspace)
+
+/*-- run this script to resize the log to appropriate size
+USE [master]
+GO
+ALTER DATABASE [mydb2] MODIFY FILE ( NAME = N'p_mydb_log', SIZE = 40000MB )
+GO
+*/
+-------------- resize log Ebds------------
+
+--more physical file moves starts
+
+--move system DB files
+--for tempdb, alter database in order to define where you will "want" the files, stop sql service, start sql service
+--for other databases, alter database in order to define where you will "put" the files to be located, stop sql service, then move the files, start sql service
+--for master database, change startup parameters, alter database in order to define where you will "put" the files, stop sql service, then move the files, start sql service
+
+--more physical files moves ends
+
+
+
+-------------- log space Begins-------------
+-- backup log file
+-- make it simple recovery, if needed
+-- checkpoint
+-- now resize, if planning to
+--select * from fn_dblog(null,null)
+dbcc sqlperf (logspace)
+-------------- log space Ends-------------
+
+
+
+
+--------remove unneeded log files begins-----------------
+sp_helpfile
+-- shrink the file first to small size then do the following - replace the logical file names
+
+use [db3V2]
+go
+dbcc shrinkfile (N'db3_Log2' , 1)
+go
+dbcc shrinkfile(N'db3_Log2',EMPTYFILE)
+go
+dbcc sqlperf(logspace)
+go
+alter database db3V2 REMOVE FILE db3_Log2
+go
+sp_helpfile
+---- inctrease the first file to 10GB
+ALTER DATABASE [db3V2] MODIFY FILE (NAME = N'db_data_1', SIZE = 10GB)
+GO
+
+
+---VLF's-------
+dbcc loginfo(db3V2)
+
+-- rule: there must be at least two VLF's with one active for the entire log.
+-- if a secondary log file does not allow to be removed, use loginfo to find
+-- how many VLF's are there there. if needed add more space to the primary log 
+-- file to make the entire log at least with 2 VLF's. then try removing the 
+-- secondary log file.
+
+--------remove unneeded log files ends-----------------
+
+
+
+------------rename logical file name begins-----------
+alter database db5 modify file (name = 'D_db54_Log', newname = 'db5_Log');
+-->this may cause ftrow to be created
+------------rename logical file name ends-----------
+
+
+
+---- log file corrupt or unavailable begins----------------------
+Undocumented DBCC command - Rebuild_Log and put database in Emergency Mode
+
+exec sp_configure 'allow updates',1
+reconfigure with override
+go
+
+begin tran
+update master..sysdatabases
+set status = 32768
+where name = <database name>
+
+if @@rowcount = 1
+begin
+    commit tran
+     raiserror ('emergency mode set',0,1)
+end
+else
+begin
+    rollback
+     raiserror ('unable to set emergency mode',16,1)
+end 
+go
+
+exec sp_configure 'allow updates', 0
+reconfigure with override
+go
+
+- - *** Restart SQL Server
+
+DBCC REBUILD_LOG ('<database name>','<fully qualified logfile name>')
+
+/* 
+Perform physical and logical integrity checks DBCC CHECKDB.
+Generate SQL Script - - May need to use Query Analyzer.
+Extract data if your integrity checks determine there is a problem.
+*/
+
+ALTER DATABASE <database name> SET MULTI_USER
+GO
+
+/* Configure Recovery Model and also correct Transaction Log Size */
+---- log file corrupt or unavailable ends----------------------
+
+
+
+----rename database starts----
+USE [master]
+GO
+ALTER DATABASE [db6_X] SET SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+
+/*
+-- obtain database file info
+db6_X	PRIMARY  [Default]	db6_X	    E:\SQLdrive2\db6_X.mdf
+db6_X	Data_X				db6_X_Data1	E:\SQLdrive2\db6_X_Data1.ndf
+db6_X	tranlog	            db6_X_log	E:\SQLtranlog1\db6_X_log.ldf
+*/
+
+--change fg name
+ALTER DATABASE db6_X MODIFY FILEGROUP [Data_X] NAME = [Data_Y]
+go
+
+-- modify logical file names
+ALTER DATABASE [db6_X] MODIFY FILE (NAME=N'db6_X', NEWNAME=N'db6_Y')
+ALTER DATABASE [db6_X] MODIFY FILE (NAME=N'db6_X_Data1', NEWNAME=N'db6_Y_Data1')
+ALTER DATABASE [db6_X] MODIFY FILE (NAME=N'db6_X_log', NEWNAME=N'db6_Y_log')
+GO
+
+-- prep rename physical file names
+sp_configure 'show advanced options'
+GO
+sp_configure
+go
+sp_configure 'xp_cmdshell', 1
+GO
+RECONFIGURE WITH OVERRIDE
+GO
+sp_configure
+go
+
+--rename database
+EXEC master..sp_renamedb 'db6_X','db6_Y'
+GO
+
+-- take database offline
+ALTER DATABASE [db6_Y] SET OFFLINE WITH ROLLBACK IMMEDIATE
+GO
+
+-- rename physical file names
+EXEC xp_cmdshell 'RENAME "E:\SQLdrive2\db6_X.mdf", "db6_Y.mdf"'
+EXEC xp_cmdshell 'RENAME "E:\SQLdrive2\db6_X_Data1.ndf", "db6_Y_Data1.ndf"'
+EXEC xp_cmdshell 'RENAME "E:\SQLtranlog1\db6_X_log.ldf", "db6_Y_log.ldf"'
+GO
+
+-- move physical file to a different location
+EXEC xp_cmdshell 'MOVE "E:\SQLtranlog1\SDAnalytics_log.ldf", "E:\SQLtranlog2"'
+GO
+
+-- modify physical file names
+ALTER DATABASE [db6_Y] MODIFY FILE (NAME = db6_Y, FILENAME = 'E:\SQLdrive2\db6_Y.mdf');
+ALTER DATABASE [db6_Y] MODIFY FILE (NAME = db6_Y_Data1, FILENAME = 'E:\SQLdrive2\db6_Y_Data1.ndf');
+ALTER DATABASE [db6_Y] MODIFY FILE (NAME = db6_Y_log, FILENAME = 'E:\SQLtranlog1\db6_Y_log.ldf');
+Go
+
+-- bring the Database online
+ALTER DATABASE [db6_Y] SET ONLINE
+go
+
+-- set database for multi-user
+ALTER DATABASE [db6_Y] SET  MULTI_USER
+GO
+
+-- reconfig
+sp_configure 'show advanced options'
+GO
+sp_configure
+go
+sp_configure 'xp_cmdshell', 0
+GO
+RECONFIGURE WITH OVERRIDE
+GO
+sp_configure
+go
+
+----rename database ends----
+

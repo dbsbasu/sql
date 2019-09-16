@@ -1,0 +1,19 @@
+http://www.sqlskills.com/blogs/erin/understanding-when-statistics-will-automatically-update/
+
+http://www.sqlskills.com/blogs/kimberly/what-caused-that-plan-to-go-horribly-wrong-should-you-update-statistics/
+
+--> below gives an wonderful analogy
+http://www.brentozar.com/archive/2013/08/what-is-the-cxpacket-wait-type-and-how-do-you-reduce-it/
+
+--> maxdop setting reco
+https://support.microsoft.com/en-us/kb/2806535
+
+
+
+
+ssrs - drillthrough
+https://technet.microsoft.com/en-us/library/aa337477(v=sql.105).aspx
+
+
+modeling nosql vs sql
+https://highlyscalable.wordpress.com/2012/03/01/nosql-data-modeling-techniques/

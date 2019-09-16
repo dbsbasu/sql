@@ -1,0 +1,174 @@
+
+/*
+create table dbo.test1 (id tinyint identity(1,1), name varchar(20) null)
+insert into dbo.test1 (name) values ('basu')
+select * from dbo.test1
+--alter table dbo.test1 alter column name varchar(16) not null
+--alter table dbo.test1 rebuild
+*/
+--drop table dbo.test1 
+dbcc traceon(3604);
+go
+declare @dbccind table
+(
+	 PageFID tinyint
+	,PagePID int
+	,IAMFID tinyint
+	,IAMPID int
+	,ObjectID int
+	,IndexID tinyint
+	,PartitionNumber tinyint
+	,PartitionID bigint
+	,iam_chain_type varchar(30)
+	,PageType tinyint
+	,IndexLevel tinyint
+	,NextPageFID tinyint
+	,NextPagePID int
+	,PrevPageFID tinyint
+	,PrevPagePID int
+);
+insert into @dbccind
+exec('dbcc ind (db1, test1, -1)');
+select 
+	 PageFID
+	,PagePID
+	,IAMFID
+	,IAMPID
+	,IndexID
+	,PartitionID
+	,PageType
+	,IndexLevel
+	,
+	(case when(PagePID = 156) then	'CLS IAM'
+	      when(PagePID = 908) then	'CLS Non_Leaf (Root)'
+		  when(PagePID = 5485) then	'CLS Leaf'
+		  when(PagePID = 855) then	'Non-CLS IAM'
+		  when(PagePID = 11847) then 'Non-CLS Leaf'
+		  when(PagePID = 4532) then	'Non-CLS Non_Leaf (Root)'		  		  		  
+		  when(PagePID = 12192) then	'Non-CLS2 IAM'		  
+		  when(PagePID = 12201) then	'Non-CLS2 Leaf'
+		  when(PagePID = 8896) then	'Non-CLS2 Non_Leaf'
+		  when(PagePID = 12189) then	'Non-CLS2 Non_Leaf Level 2 (Root)'
+		  when(PagePID = 908) then	'CLS Non_Leaf'		  		  		  		  
+	 end) as 'myComments' 
+from @dbccind;
+-----now look at specific pages
+dbcc page (db1, 1, 296, 3);
+--11947: cls leaf. 12976: cls non-leaf. 19504: cls leaf level 2 (root). 154: iam 
+--23097: non-cls (clm) leaf. 23280: non-cls(clm) non-leaf (root). 
+--23847: non-cls (inv) leaf. 24200: non-cls (inv) non-leaf. 11841: non-cls (inv) non-leaf level 2 (root).
+go
+
+dbcc traceoff;
+go
+
+--------------
+/*
+--ridFn
+create function convert_rids (@rid binary(8))
+	returns varchar(30)
+as
+	begin
+	return (
+			convert (varchar(5),
+				convert (int, substring(@rid, 6, 1) + substring(@rid, 5, 1)))
+				+':'+
+			convert (varchar(10),
+				convert (int, substring(@rid, 4, 1) + substring(@rid, 3, 1) 
+						+ substring(@rid, 2, 1) + substring(@rid, 1, 1)))
+				+':'+				
+			convert (varchar(5),
+				convert (int, substring(@rid, 8, 1) + substring(@rid, 7, 1))))
+	end;
+	go
+
+select dbo.convert_rids (0x8A55000001002700)
+go
+*/
+
+
+
+
+------------------------------------------------------------------------------
+dbcc traceon(3604);
+go
+declare @dbccind table
+(
+	 PageFID tinyint
+	,PagePID int
+	,IAMFID tinyint
+	,IAMPID int
+	,ObjectID int
+	,IndexID tinyint
+	,PartitionNumber tinyint
+	,PartitionID bigint
+	,iam_chain_type varchar(30)
+	,PageType tinyint
+	,IndexLevel tinyint
+	,NextPageFID tinyint
+	,NextPagePID int
+	,PrevPageFID tinyint
+	,PrevPagePID int
+);
+insert into @dbccind
+exec('dbcc ind (DMGMail, [dbo.Invoice_Keys], -1)');
+select 
+	 PageFID
+	,PagePID
+	,IAMFID
+	,IAMPID
+	,IndexID
+	,PartitionID
+	,PageType
+	,IndexLevel
+/*	,
+	(case when(PagePID = 156) then	'CLS IAM'
+	      when(PagePID = 908) then	'CLS Non_Leaf (Root)'
+		  when(PagePID = 5485) then	'CLS Leaf'
+		  when(PagePID = 855) then	'Non-CLS IAM'
+		  when(PagePID = 11847) then 'Non-CLS Leaf'
+		  when(PagePID = 4532) then	'Non-CLS Non_Leaf (Root)'		  		  		  
+		  when(PagePID = 12192) then	'Non-CLS2 IAM'		  
+		  when(PagePID = 12201) then	'Non-CLS2 Leaf'
+		  when(PagePID = 8896) then	'Non-CLS2 Non_Leaf'
+		  when(PagePID = 12189) then	'Non-CLS2 Non_Leaf Level 2 (Root)'
+		  when(PagePID = 908) then	'CLS Non_Leaf'		  		  		  		  
+	 end) as 'myComments' */
+from @dbccind
+where Indexid = 3 
+	and 
+	Indexlevel = 2
+	--and
+	--PageType = 10
+go
+dbcc page (DMGMail, 1, 11841, 3) 
+--11947: cls leaf. 12976: cls non-leaf. 19504: cls leaf level 2 (root). 154: iam 
+--23097: non-cls (clm) leaf. 23280: non-cls(clm) non-leaf (root). 
+--23847: non-cls (inv) leaf. 24200: non-cls (inv) non-leaf. 11841: non-cls (inv) non-leaf level 2 (root).
+go
+dbcc traceoff;
+go
+
+--------------
+--ridFn
+
+create function convert_rids (@rid binary(8))
+	returns varchar(30)
+as
+	begin
+	return (
+			convert (varchar(5),
+				convert (int, substring(@rid, 6, 1) + substring(@rid, 5, 1)))
+				+':'+
+			convert (varchar(10),
+				convert (int, substring(@rid, 4, 1) + substring(@rid, 3, 1) 
+						+ substring(@rid, 2, 1) + substring(@rid, 1, 1)))
+				+':'+				
+			convert (varchar(5),
+				convert (int, substring(@rid, 8, 1) + substring(@rid, 7, 1))))
+	end;
+	go
+
+select dbo.convert_rids (0x8A55000001002700)
+go
+

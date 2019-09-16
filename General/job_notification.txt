@@ -1,0 +1,8 @@
+this is how my job steps look like
+
+Step    Name                  Type                   On Success                     On Failure
+1       do sql whatever       T-SQL / SSIS etc       Go to the next step            Go to step: [4] Send_Failure_Email
+2       do sql whatever       T-SQL / SSIS etc       Go to the next step            Go to step: [4] Send_Failure_Email
+3       Send_Success_Email    T-SQL                  Quit the job reorting success  Go to step: [4] Send_Failure_Email
+4       Send_Failure_Email    T-SQL                  Quit the job reorting failure  Quit the job reorting failure
+

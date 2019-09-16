@@ -1,0 +1,54 @@
+--specific date
+use [msdb]
+select t1.JobNam, t1.run_status, t1.HIST_run_date, t1.HIST_run_time, t1.step_id, t1.step_name, t1.HIST_run_duration
+,t1.instance_id, t1.[message], t1.sql_message_id, t1.sql_severity
+from 
+(SELECT job.[name] as JobNam, hist.run_status
+,hist.run_date as HIST_run_date
+,SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),1,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),3,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),5,2) as HIST_run_time  
+,SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),1,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),3,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),5,2) as HIST_run_duration
+,RANK() over (partition by job.name order by hist.run_date desc, hist.run_time desc, hist.job_id asc) as rank1
+,hist.instance_id ,hist.step_id, hist.step_name, hist.message, hist.sql_message_id, hist.sql_severity
+  FROM msdb.dbo.sysjobs job with (nolock)
+  inner join msdb.dbo.sysjobhistory hist with (nolock)
+  on hist.job_id = job.job_id
+--  and hist.step_id = 1
+--  and hist.run_status = 1
+  and job.[enabled] = 1
+--  and job.name like 'Index Maint%'
+  and hist.run_date <= (select max(hist2.run_date)
+						from msdb.dbo.sysjobhistory hist2  with (nolock)
+						where hist2.job_id = hist.job_id
+						and   hist2.step_id = hist.step_id
+						and   hist2.run_status = hist.run_status)
+) as t1
+where t1.HIST_run_date = 20130225 
+order by t1.JobNam, t1.instance_id
+
+
+-- last n occurrance
+use [msdb]
+select t1.JobNam, t1.run_status, t1.HIST_run_date, t1.HIST_run_time, t1.HIST_run_duration
+,t1.instance_id,t1.step_id, t1.step_name, t1.[message], t1.sql_message_id, t1.sql_severity
+from 
+(SELECT job.[name] as JobNam, hist.run_status
+,hist.run_date as HIST_run_date
+,SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),1,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),3,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),5,2) as HIST_run_time  
+,SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),1,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),3,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),5,2) as HIST_run_duration
+,RANK() over (partition by job.name order by hist.run_date desc, hist.run_time desc, hist.job_id asc) as rank1
+,hist.instance_id ,hist.step_id, hist.step_name, hist.message, hist.sql_message_id, hist.sql_severity
+  FROM msdb.dbo.sysjobs job with (nolock)
+  inner join msdb.dbo.sysjobhistory hist with (nolock)
+  on hist.job_id = job.job_id
+--  and hist.step_id = 1
+--  and hist.run_status = 1
+  and job.[enabled] = 1
+--  and job.name like 'Index Maint%'
+  and hist.run_date <= (select max(hist2.run_date)
+						from msdb.dbo.sysjobhistory hist2  with (nolock)
+						where hist2.job_id = hist.job_id
+						and   hist2.step_id = hist.step_id
+						and   hist2.run_status = hist.run_status)
+) as t1
+where t1.rank1 <= 10
+order by t1.JobNam, t1.instance_id

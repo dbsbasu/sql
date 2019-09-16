@@ -1,0 +1,24 @@
+--generate literal list in a query
+--list the literals under column A. then add this formula to the next column. formula, =CONCATENATE(",","('",(A1),"')"). copy paste the result under the query below
+
+if object_id('tempdb..#t1') is not null drop table #t1;
+
+CREATE TABLE #t1 (col1 VARCHAR(80))
+INSERT INTO #t1 (col1) VALUES 
+ ('I')
+,('You')
+,('Us')
+;
+
+--SELECT * FROM #t1
+
+select 
+'%aurora
+select count(*) as '+ col1 +'_null from schema1.table1 where ' + col1 + ' is null ;      
+select count(*) '+ col1 +'_blank from schema1.table1 where ' +  col1  + ' = ''''' + ' ;
+
+' 
+from #t1;
+
+if object_id('tempdb..#t1') is not null drop table #t1;
+-- you get the query script generated

@@ -1,0 +1,102 @@
+--FTS and more match and research
+--sb
+DECLARE @timestamp1 DATETIME2, @timestamp2 DATETIME2;
+SET @timestamp1 = SYSDATETIME();
+
+DECLARE @Street VARCHAR(250) = 'V/L 435nd Ave., 8976 12th St., V/L 32nd St.';
+DECLARE @City VarCHAR(50) = 'anycity';
+DECLARE @StateCode CHAR(2) = 'OO';
+DECLARE @Zip VARCHAR(5) = '54321';
+
+
+SELECT  @Street + ' ' + @City + ' ' + @StateCode + ' ' + @Zip AS Input_Address;
+
+DECLARE @Delimiter CHAR(1) = ' ';
+DECLARE @StreetReplace VARCHAR(250)
+DECLARE @StreetLength INT = LEN(@Street) + 1, @DelimiterLength INT = 1;
+DECLARE @StreetNameTable TABLE (Id TINYINT, StartPosition TINYINT, 	EndPosition TINYINT, NamePart VARCHAR(250), NamePartLength AS LEN(NamePart), PureNumberPart VARCHAR(250), PureNumberPartLength AS LEN(PureNumberPart), NonNumberPart VARCHAR(250), NonNumberPartLength AS LEN(NonNumberPart))
+DECLARE @StreetNumber VARCHAR(20);
+DECLARE @StreetNumberWildCard VARCHAR(22);
+DECLARE @NamePartWildCard VARCHAR(252);
+DECLARE @PreviousOrderStreetAddressTable TABLE (KeyRank INT, AddressTableId INT, StreetAddress1 VARCHAR(250))
+
+--replace non-charatcers, nun-numbers with space
+SET @StreetReplace = @Street;
+Declare @KeepValues as varchar(80)
+Set @KeepValues = '%[^A-Z^a-z^0-9 ]%'
+    While PatIndex(@KeepValues, @StreetReplace) > 0 
+		SET @StreetReplace = Stuff(@StreetReplace, PatIndex(@KeepValues, @StreetReplace), 1, '');
+SELECT @StreetReplace;
+
+;WITH CTE_NameParts AS (
+	SELECT [start] = 1 
+		  ,[end]   = COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, 1), 0), @StreetLength)
+		  ,[value] = SUBSTRING(@StreetReplace, 1, COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, 1), 0), @StreetLength) - 1)
+    UNION ALL
+    SELECT [start] = CONVERT(INT, [end]) + @DelimiterLength
+          ,[end]   = COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, [end] + @DelimiterLength ), 0), @StreetLength)
+	      ,[value] = SUBSTRING(@StreetReplace, [end] + @DelimiterLength, COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, [end] + @DelimiterLength), 0), @StreetLength) - [end] - @DelimiterLength)
+    FROM CTE_NameParts
+    WHERE [end] < @StreetLength
+)
+INSERT INTO @StreetNameTable (Id, StartPosition, EndPosition, NamePart, PureNumberPart, NonNumberPart)
+SELECT row_number() OVER(ORDER BY LEN([value]) desc), [start], [end] - 1, [value],
+SUBSTRING (' '+[value]+' ', PATINDEX('%[0-9]%', ' '+[value]+' '),  PATINDEX('%[^0-9]%',SUBSTRING(' '+[value]+' ', PATINDEX('%[0-9]%', ' '+[value]+' '), len(' '+[value]+' '))) - 1), 
+SUBSTRING (' '+[value]+' ', PATINDEX('%[A-Za-z]%', ' '+[value]+' '),  PATINDEX('%[^A-Z^a-z]%',SUBSTRING(' '+[value]+' ', PATINDEX('%[A-Za-z]%', ' '+[value]+' '), len(' '+[value]+' '))) - 1)
+FROM CTE_NameParts
+WHERE LEN([value]) > 0 --AND [value] NOT LIKE @StreetNumberWildCard;
+
+SELECT * FROM @StreetNameTable
+
+SELECT @StreetNumberWildCard = '%' + PureNumberPartT1.PureNumberPart + '%' 
+FROM (SELECT ROW_NUMBER() OVER(ORDER BY [PureNumberPartLength] desc) AS PureNumberPartID, PureNumberPart FROM @StreetNameTable) AS PureNumberPartT1
+WHERE PureNumberPartT1.PureNumberPartID = 1
+
+SELECT @NamePartWildCard = '%' + NonNumberPartT1.NonNumberPart + '%' 
+FROM (SELECT ROW_NUMBER() OVER(ORDER BY [NonNumberPartLength] desc) AS NonNumberPartID, NonNumberPart FROM @StreetNameTable) AS NonNumberPartT1
+WHERE NonNumberPartT1.NonNumberPartID = 1
+
+SELECT @StreetNumberWildCard StreetNumberWildCard, @NamePartWildCard AS NamePartWildCard
+
+INSERT INTO @PreviousOrderStreetAddressTable (KeyRank, AddressTableId, StreetAddress1)
+SELECT TOP 20 RankAddress.[Rank], AddressTableId, StreetAddress1 
+FROM dbo.AddressTable AddressTable
+INNER JOIN FREETEXTTABLE(dbo.AddressTable, StreetAddress1, @Street, 1000) AS RankAddress 
+ON AddressTable.AddressTableID = RankAddress.[KEY]
+WHERE	AddressTable.City = @City
+AND		AddressTable.StateCode = @StateCode
+AND		AddressTable.Zip = @Zip
+
+SELECT t1.AddressTableId, t1.StreetAddress1
+FROM @PreviousOrderStreetAddressTable t1
+
+SELECT t1.AddressTableId, t1.StreetAddress1
+FROM @PreviousOrderStreetAddressTable t1
+WHERE t1.StreetAddress1 LIKE @StreetNumberWildCard AND t1.StreetAddress1 LIKE @NamePartWildCard;
+
+
+
+
+/*
+--sb
+--exact match
+DECLARE @timestamp1 DATETIME2, @timestamp2 DATETIME2;
+SET @timestamp1 = SYSDATETIME();
+
+DECLARE @Street VARCHAR(250) = '180 w FOREST DR';
+DECLARE @City VarCHAR(50) = 'COVINGTON';
+DECLARE @StateCode CHAR(2) = 'GA';
+DECLARE @Zip VARCHAR(5) = '30016';
+
+SELECT * FROM atlas.dbo.AddressTable
+WHERE AddressTable.StreetAddress1	= @Street
+AND	  AddressTable.city				= @City
+AND   AddressTable.StateCode			= @StateCode
+AND   AddressTable.Zip				= @Zip
+;
+
+SET @timestamp2 = SYSDATETIME();
+SELECT DATEDIFF(MICROSECOND, @timestamp1, @timestamp2);
+
+*/
+

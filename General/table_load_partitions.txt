@@ -1,0 +1,196 @@
+USE [master];
+EXEC msdb.dbo.sp_delete_database_backuphistory @database_name = N'fillStrategy'
+ALTER DATABASE [fillStrategy] SET  SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+DROP DATABASE [fillStrategy]
+GO
+--create database
+CREATE DATABASE [fillStrategy]
+CONTAINMENT = NONE
+ON  PRIMARY 
+( NAME = N'fillStrategy', FILENAME = N'N:\Mounts\Data\fillStrategy.mdf' , SIZE = 3072KB , FILEGROWTH = 0), 
+ FILEGROUP [FGData] 
+( NAME = N'FGData_00', FILENAME = N'N:\Mounts\Data\FGData_00.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_01', FILENAME = N'N:\Mounts\Data\FGData_01.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_02', FILENAME = N'N:\Mounts\Data\FGData_02.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_03', FILENAME = N'N:\Mounts\Data\FGData_03.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_04', FILENAME = N'N:\Mounts\Data\FGData_04.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_05', FILENAME = N'N:\Mounts\Data\FGData_05.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_06', FILENAME = N'N:\Mounts\Data\FGData_06.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_07', FILENAME = N'N:\Mounts\Data\FGData_07.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_08', FILENAME = N'N:\Mounts\Data\FGData_08.ndf' , SIZE = 512KB , FILEGROWTH = 0),
+( NAME = N'FGData_09', FILENAME = N'N:\Mounts\Data\FGData_09.ndf' , SIZE = 512KB , FILEGROWTH = 0)
+LOG ON 
+( NAME = N'fillStrategy_log', FILENAME = N'N:\Mounts\Logs\fillStrategy_log.ldf' , SIZE = 2048KB , FILEGROWTH = 0)
+GO
+USE [fillStrategy]
+GO
+IF NOT EXISTS (SELECT name FROM sys.filegroups WHERE is_default=1 AND name = N'PRIMARY') ALTER DATABASE [fillStrategy] MODIFY FILEGROUP [PRIMARY] DEFAULT
+GO
+ALTER AUTHORIZATION ON database::fillStrategy TO sa
+
+
+--test 1: partitioned table
+--create PF and PS
+IF NOT EXISTS (SELECT * FROM sys.partition_functions WHERE name = N'myPF')
+CREATE PARTITION FUNCTION myPF(TINYINT) AS RANGE LEFT FOR VALUES (0, 1, 2, 3, 4, 5, 6, 7, 8, 9)
+GO
+IF NOT EXISTS (SELECT * FROM sys.partition_schemes WHERE name = N'myPS')
+CREATE PARTITION SCHEME myPS AS PARTITION myPF TO (FGData, FGData, FGData, FGData, FGData, FGData, FGData, FGData, FGData, FGData, FGData)
+GO
+--create partitioned table
+create table dbo.testData (
+ PartId tinyint not NULL
+,Id int not NULL
+,fillData varchar(800) null
+,recAddDatetime datetime2 not null constraint DF_recAddDatetime default sysdatetime()
+) on myPS (PartId);
+create unique clustered index AK_testData on dbo.testData (PartId asc, Id asc) with (pad_index = on, fillfactor = 100) on  myPS (PartId);
+
+
+--test 2: non-partitioned table
+--create a table and clustered index non-partitioned
+/*
+CREATE table dbo.testData (
+ PartId tinyint not NULL
+,Id int not NULL
+,fillData varchar(800) null
+,recAddDatetime datetime2 not null constraint DF_recAddDatetime default sysdatetime()
+) on [FGdata];
+create unique clustered index AK_testData on dbo.testData (Id asc) with (pad_index = on, fillfactor = 100) on [FGdata];
+*/
+
+--add data into table
+set nocount on;
+declare @Id int = 0, @iterate int = 0, @addrows int, @PartId tinyint = 0;
+set @addrows = 10 --> set number of inserts
+select @Id = 1 + coalesce(max(Id),0) from dbo.testData;
+--set @Id = 51 --> uncomment to overrIde Id value
+---->(a)set Id = 0 and the if statement below... this will insert Id values that are NOT divisible by 10
+--set @Id = 0 --> uncomment to overrIde Id value
+set @iterate = @Id + @addrows - 1;
+select 'next Id starts at: ' + cast (@Id as varchar(10)) 
+          + ' / ends at: '  + cast (@iterate as varchar(10)) 
+		  + ' / adding ' + cast(@addrows as varchar(10)) + ' rows ; ';
+
+while @Id <= @iterate
+begin
+	set @PartId = (ABS (@Id % (10)));
+	insert into dbo.testData (PartId, Id, fillData) values (@PartId, @Id, replicate('a',781))
+	set @Id = @Id + 1;
+END
+
+
+--verify results
+--select * from dbo.testData order by Id asc
+
+-- verify total page allocations
+
+--get page allocations, row count per partition
+SELECT	 OBJECT_SCHEMA_NAME(pt.object_Id)+'.'+OBJECT_NAME(pt.object_id) AS objectName, pt.object_id, pt.index_id, ix1.name AS indexName, ix1.type_desc AS indexType, psc.name + ' ' + 
+pf.name + ' ' + CAST(ISNULL(prv.value,'catchAll') AS VARCHAR(10)) AS partition_Scheme_Function_RangeValue
+		,pt.partition_id, pt.partition_number, pt.rows 
+		,ddpa1.allocated_page_file_id, COUNT(ddpa1.allocated_page_page_id) AS pageCounts, ddpa1.page_type_desc, ddpa1.page_level
+FROM		sys.partitions pt
+INNER join sys.indexes ix1 ON ix1.object_id = pt.object_id AND ix1.index_id = pt.index_id
+INNER JOIN sys.partition_schemes as psc  with (nolock) on psc.data_space_id = ix1.data_space_id
+INNER JOIN sys.partition_functions pf with (nolock) ON pf.function_id = psc.function_id
+LEFT OUTER JOIN sys.partition_range_values prv with (nolock) ON prv.function_id = pf.function_id AND prv.boundary_id = pt.partition_number
+LEFT outer JOIN	sys.dm_db_database_page_allocations(db_Id(), object_Id('dbo.testData'), null, null, 'DETAILED') ddpa1 ON ddpa1.database_id = DB_ID() AND ddpa1.object_id = pt.object_id AND ddpa1.index_id = pt.index_id AND ddpa1.rowset_id = pt.partition_id
+WHERE object_schema_name(pt.object_Id) = 'dbo'
+AND	  OBJECT_NAME(pt.object_id) = 'testData' 
+AND ISNULL(ddpa1.page_type_desc, 'data_page') = 'data_page'
+GROUP BY OBJECT_SCHEMA_NAME(pt.object_Id), OBJECT_NAME(pt.object_id), pt.object_id, pt.index_id, ix1.name, ix1.type_desc, psc.name + ' ' + pf.name + ' ' + CAST(ISNULL(prv.value,'catchAll') AS VARCHAR (10))
+,pt.partition_id, pt.partition_number, pt.rows 
+,ddpa1.allocated_page_file_id, ddpa1.page_type_desc, ddpa1.page_level
+ORDER BY  OBJECT_SCHEMA_NAME(pt.object_Id), OBJECT_NAME(pt.object_id), pt.object_id, pt.index_id, ix1.name, ix1.type_desc, psc.name + ' ' + pf.name + ' ' + CAST(ISNULL(prv.value,'catchAll') AS 
+VARCHAR(10))
+,pt.partition_id, pt.partition_number, pt.rows 
+,ddpa1.allocated_page_file_id, ddpa1.page_type_desc, ddpa1.page_level
+
+
+
+-- this query returns file info for the pointed database only, by default
+-- if you want to return data for the enrire instance, please comment out the db_name() statement
+set nocount on;
+if object_Id('tempdb..#Space_Info') is not null drop table #Space_Info;
+GO
+
+declare @SpaceUnit char (2) ='MB';
+--uncomment one statement below, to indicate space unit as GB
+--set @SpaceUnit = 'GB';
+declare @unit_conv numeric (20,16);
+if @SpaceUnit = 'GB'
+	set @unit_conv = 8.0/(1024.0*1024.0); 
+else
+	set @unit_conv = 8.0/(1024.0);        
+
+create table #Space_Info
+   ([Id] int Identity (0,1),
+    [DBName] [sysname] NULL, 
+    [FGId] [int] NULL, 
+    [FGOrder] [int] NULL, 
+    [FGName] [sysname] NULL, 
+    [file_Id] [int] NULL, 
+    [Logical_name] [sysname] NULL, 
+    [Physicalphysical_name] [nvarchar](800) NULL, 
+    [PhysicalFilePath] [nvarchar](800) NULL, 
+    [Allocation] [decimal](12, 3) NULL, 
+    [SpaceUsed] [decimal](12, 3) NULL, 
+    [FreeSpace] [decimal](12, 3) NULL,
+    [%_FreeSpace] [decimal](12, 2) NULL,
+    [Growth] [decimal](12, 0) NULL,
+	[Growth_suffix] [varchar](10) NULL,
+    [max_size] [decimal](12, 3) NULL,
+    [IsDefaultFG] [int] NULL,
+    [IsReadOnlyFG] [int] NULL,
+	[PhysicalFile] [nvarchar](800) NULL,
+	[unit_conv] [numeric] (20,16) NULL,
+	[SpaceUnit] [char](2) NULL);
+
+insert into #Space_Info (unit_conv, SpaceUnit) values (@unit_conv, @SpaceUnit);
+
+EXEC sp_msForEachDB ' 
+if ''[?]'' in (''[ResourceDb]'') return
+if ''[?]'' not in (''''+quotename(db_name())+'''') return  --> comment out for entire instance
+use [?] 
+declare @unit_conv numeric (20,16), @SpaceUnit char (2) ='''';
+select @unit_conv = unit_conv, @SpaceUnit = SpaceUnit from #Space_Info where Id = 0;
+insert into #Space_Info
+SELECT DB_NAME() as DBName
+,isnull(fg.data_space_Id,0) as FGId
+,isnull(fg.data_space_Id,99) AS FGOrder
+,isnull((fg.name + (case when(fg.is_default = 1) then ''  [Default]'' else '''' end)),''TranLog'') as FGName 
+,df.file_Id as file_Id, df.name as Logical_name
+,COALESCE(substring(df.physical_name, ((len(df.physical_name))-CHARINDEX((''\''), reverse(df.physical_name))+2), (len(df.physical_name))), df.physical_name) as 
+Physicalphysical_name
+,COALESCE(substring(df.physical_name, 1, ((len(df.physical_name))-CHARINDEX((''\''), reverse(df.physical_name))+1)), df.physical_name) as PhysicalFilePath
+,convert(decimal(12,3),round(df.size*@unit_conv,3)) as Allocation 
+,convert(decimal(12,3),round(fileproperty(df.name,''SpaceUsed'')*@unit_conv,3)) as SpaceUsed 
+,convert(decimal(12,3),round((df.size-fileproperty(df.name,''SpaceUsed''))*@unit_conv,3)) as FreeSpace 
+,[%_FreeSpace] = convert(decimal(5,2),round((df.size-fileproperty(df.name,''SpaceUsed''))*100.00/df.size/1.00,2))
+,case when df.is_percent_growth = 1 then df.growth else df.growth*8.0/1024.0 end as Growth
+,case when df.is_percent_growth = 1 then ''%'' else ''MB'' end as Growth_suffix
+,case when df.growth > 0 and df.max_size <> -1 then convert(decimal(12,3),round(df.max_size*@unit_conv,3)) when df.growth > 0 and df.max_size = -1 then df.max_size 
+else 0 end as max_size
+,isnull(fg.is_default,0) as IsDefaultFG, isnull(fg.is_read_only,0) as  IsReadOnlyFG
+,df.physical_name as PhysicalFile
+,@unit_conv 
+,@SpaceUnit
+FROM [?].sys.database_files df
+LEFT OUTER JOIN sys.filegroups fg
+ON df.data_space_Id = fg.data_space_Id;
+'
+--per DB, FG, File
+SELECT [DBName], [FGName], [file_Id], [Logical_name], [PhysicalFilePath], [Physicalphysical_name], [Allocation], [SpaceUsed], [FreeSpace], [%_FreeSpace], max_size, 
+cast(Growth as varchar(20)) + ' ' + Growth_suffix as 'Growth_MB_or_%'
+FROM #Space_Info
+--where DBName like 'tl_%'
+where Id > 0
+order by DBName, FGOrder, [Logical_name];
+
+IF object_Id('tempdb..#Space_Info') is not null drop table #Space_Info;
+GO
+
+
+

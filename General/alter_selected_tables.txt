@@ -1,0 +1,19 @@
+EXEC sp_msForEachTable ' 
+if ''?'' in (''[dbo].[dtproperties]'') return
+print ''?''
+IF NOT EXISTS (SELECT 1 FROM dbo.syscolumns WHERE id = OBJECT_ID(''?'') AND name = ''CRQ_PKG'')
+BEGIN
+	alter table ? add CRQ_PKG varchar(20) null;
+	print '' ^^^^^^ column CRQ_PKG added''
+END
+ELSE
+	print '' ************************** column CRQ_PKG exists''
+IF NOT EXISTS (SELECT 1 FROM dbo.syscolumns WHERE id = OBJECT_ID(''?'') AND name = ''CRQ_CONTACT'')
+BEGIN
+	alter table ? add CRQ_CONTACT varchar(20) null;
+	print '' ^^^^^^ column CRQ_CONTACT added''
+END
+ELSE
+	print '' ************************** column CRQ_CONTACT exists''
+';
+

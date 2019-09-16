@@ -1,0 +1,82 @@
+--create table and proc (below as logistics) and then set up cdc
+--1. enable cdc on database db1
+use [db1];
+exec sys.sp_cdc_enable_db
+
+--2. enable cdc on a table
+use db1;
+exec sys.sp_cdc_enable_table  
+    @source_schema = N'dbo'  
+  , @source_name = N't1'  
+  , @role_name = Null
+  , @capture_instance = N't1_comments_time'   
+  , @supports_net_changes = 1  
+  , @index_name = N'ak_t1'   
+  , @captured_column_list = N'comments, sysadddatetime'   
+  , @filegroup_name = N'cdcFG1'; 
+
+--3. query cdc data
+
+declare @from_lsn binary(10), @to_lsn binary(10), @extraction_time datetime2;  
+set @extraction_time = '2001-06-09 13:12:39.7968264';  
+select @from_lsn = sys.fn_cdc_map_time_to_lsn ('smallest greater than or equal', @extraction_time);  
+--set @from_lsn = sys.fn_cdc_get_min_lsn('t1_comments_time');  
+set @extraction_time = '2001-06-09 13:20:39.7968264';  
+select @to_lsn = sys.fn_cdc_map_time_to_lsn ('largest less than or equal', @extraction_time);  
+--set @to_lsn   = sys.fn_cdc_get_max_lsn();
+if @from_lsn is not null  
+begin  
+select * from cdc.fn_cdc_get_all_changes_t1_comments_time
+  (@from_lsn, @to_lsn, N'all');
+end  
+
+/*
+---- logistics ----
+--0.1 create table, unique index
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_PADDING ON
+GO
+
+CREATE TABLE [dbo].[t1](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[comments] [varchar](20) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	[sysadddatetime] [datetime2](7) NOT NULL CONSTRAINT [df_sysaddatetime]  DEFAULT (sysdatetime())
+) ON [PRIMARY]
+GO
+SET ANSI_PADDING OFF
+GO
+
+CREATE UNIQUE NONCLUSTERED INDEX [ak_t1] ON [dbo].[t1]
+(
+	[sysadddatetime] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+GO
+
+--0.2 create SP to add rows
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE procedure [dbo].[usp_t1]
+ @addRec int
+,@replicateChar char(5)
+as
+set nocount on;
+declare @iterate int = 1;
+
+while @iterate <= @addRec
+begin
+	insert into dbo.t1 (comments) values (replicate(@replicateChar,2))
+	waitfor delay '00:00:001'
+	set @iterate = @iterate + 1;
+end
+
+GO
+
+--0.3 query to update rows
+update dbo.t1 set comments = '4enjoy' where id > 8
+*/

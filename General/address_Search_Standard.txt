@@ -1,0 +1,96 @@
+DECLARE @StandardAbbreviation TABLE (
+	StandardAbbreviation varchar(80) null
+);
+
+
+INSERT INTO @StandardAbbreviation (StandardAbbreviation)
+SELECT StandardAbbreviation
+FROM (
+     VALUES	
+ ('ALLEY')
+,('ALLEE')
+,('ALY')
+,('ALLEY')
+,('WLS')
+	) A_Values (StandardAbbreviation)
+WHERE NOT EXISTS (SELECT 1 
+					FROM @StandardAbbreviation B_Table
+				   WHERE A_Values.StandardAbbreviation = B_Table.StandardAbbreviation
+				   )
+
+DECLARE @Street VARCHAR(250) = '1234 Main St';
+DECLARE @City VarCHAR(50) = 'Akron';
+DECLARE @StateCode CHAR(2) = 'OH';
+DECLARE @Zip VARCHAR(5) = '12345';
+
+DECLARE @StreetNameParts TABLE (StartPosition tinyint, EndPosition tinyint, StringValue VARCHAR(80));
+SELECT  @Street + ' ' + @City + ' ' + @StateCode + ' ' + @Zip AS Input_Address;
+
+DECLARE @Delimiter CHAR(1) = ' ';
+DECLARE @StreetReplace VARCHAR(250)
+DECLARE @StreetLength INT = LEN(@Street) + 1, @DelimiterLength INT = 1;
+DECLARE @StreetNameTable TABLE (Id TINYINT, StartPosition TINYINT, 	EndPosition TINYINT, StreetNamePart VARCHAR(250), StreetNamePartLength AS LEN(StreetNamePart), PureNumberPart VARCHAR(250), PureNumberPartLength AS LEN(PureNumberPart), SearchInd CHAR(1))
+DECLARE @StreetNamePartWildCard VARCHAR(254);
+DECLARE @PreviousOrderStreetAddressTable TABLE (KeyRank INT, MyTableId INT, StreetAddress1 VARCHAR(250), City VARCHAR(50), StateCode CHAR(2), Zip CHAR(5))
+
+--replace non-charatcers, nun-numbers with space
+SET @StreetReplace = @Street;
+Declare @KeepValues as varchar(80)
+Set @KeepValues = '%[^A-Z^a-z^0-9^ ]%'
+    While PatIndex(@KeepValues, @StreetReplace) > 0 
+		SET @StreetReplace = Stuff(@StreetReplace, PatIndex(@KeepValues, @StreetReplace), 1, ' ');
+
+;WITH CTE_StreetNameParts AS (
+	SELECT [start] = 1 
+		  ,[end]   = COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, 1), 0), @StreetLength)
+		  ,[value] = SUBSTRING(@StreetReplace, 1, COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, 1), 0), @StreetLength) - 1)
+    UNION ALL
+    SELECT [start] = CONVERT(INT, [end]) + @DelimiterLength
+          ,[end]   = COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, [end] + @DelimiterLength ), 0), @StreetLength)
+	      ,[value] = SUBSTRING(@StreetReplace, [end] + @DelimiterLength, COALESCE(NULLIF(CHARINDEX(@Delimiter, @StreetReplace, [end] + @DelimiterLength), 0), @StreetLength) - [end] - @DelimiterLength)
+    FROM CTE_StreetNameParts
+    WHERE [end] < @StreetLength
+)
+INSERT INTO @StreetNameTable (Id, StartPosition, EndPosition, StreetNamePart, PureNumberPart)
+SELECT row_number() OVER(ORDER BY LEN([value]) desc), [start], [end] - 1, [value],
+SUBSTRING (' '+[value]+' ', PATINDEX('%[0-9]%', ' '+[value]+' '),  PATINDEX('%[^0-9]%',SUBSTRING(' '+[value]+' ', PATINDEX('%[0-9]%', ' '+[value]+' '), len(' '+[value]+' '))) - 1)
+FROM CTE_StreetNameParts
+WHERE LEN([value]) > 0 
+--AND [value] NOT IN (SELECT StandardAbbreviation FROM @StandardAbbreviation)
+
+;WITH CTE_StreetNamePart AS (
+SELECT TOP 1 SearchInd
+FROM @StreetNameTable
+WHERE StreetNamePartLength > PureNumberPartLength
+ORDER BY StreetNamePartLength DESC)
+UPDATE CTE_StreetNamePart
+SET SearchInd = '1'
+
+;WITH CTE_StreetNamePart2 AS (
+SELECT TOP 1 SearchInd
+FROM @StreetNameTable
+WHERE PureNumberPartLength > 0
+AND SearchInd IS NULL 
+ORDER BY PureNumberPartLength Desc)
+UPDATE CTE_StreetNamePart2 
+SET SearchInd = '2'
+
+SELECT * FROM @StreetNameTable
+
+SELECT @StreetNamePartWildCard = '%'+(SELECT StreetNamePart+'%' FROM @StreetNameTable WHERE SearchInd IN (1,2) ORDER BY StartPosition ASC FOR XML PATH ('')) 
+
+INSERT INTO @PreviousOrderStreetAddressTable (KeyRank, MyTableId, StreetAddress1, City, StateCode, Zip)
+SELECT TOP 20 RankAddress.[Rank], MyTableId, StreetAddress1, City, StateCode, Zip 
+FROM dbo.MyTable MyTable
+INNER JOIN FREETEXTTABLE(dbo.MyTable, StreetAddress1, @Street, 1000) AS RankAddress 
+ON MyTable.MyTableID = RankAddress.[KEY]
+WHERE	MyTable.City = @City
+AND		MyTable.StateCode = @StateCode
+AND		MyTable.Zip = @Zip
+
+SELECT t1.MyTableId, t1.StreetAddress1 AS Output_Matching_Addresses, City, StateCode, Zip
+FROM @PreviousOrderStreetAddressTable t1
+WHERE t1.StreetAddress1 LIKE @StreetNamePartWildCard;
+
+SELECT @StreetNamePartWildCard
+

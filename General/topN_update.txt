@@ -1,0 +1,29 @@
+declare @iteration int = 0;
+while (exists(select 1 from dbo.fillSpaceTB where seqNumber between 2000 and 2100 and commentString like 'aaa%'))
+begin
+ ;with myUpdData as
+      (
+        select top (10) *
+        from    dbo.fillSpaceTB
+        where seqNumber between 2000 and 2100
+		and commentString like 'aaa%'
+		order by seqNumber asc
+       )
+ update  myUpdData
+ set     commentString = 'updated ' + cast(@iteration as varchar(10))
+ where seqNumber between 2000 and 2100 and commentString like 'aaa%';
+
+ checkpoint;
+
+ print @iteration;
+ set @iteration = @iteration + 1;
+
+ if exists(select 1 from dbo.fillSpaceTB where (seqNumber between 2000 and 2100) and commentString like 'aaa%')
+  continue
+ else
+  break
+end
+
+select * from dbo.fillSpaceTB where seqNumber between 1990 and 2110;
+
+--delete from dbo.fillSpaceTB;dbcc checkident('dbo.fillSpaceTB', reseed, 0)

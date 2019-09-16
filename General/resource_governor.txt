@@ -1,0 +1,53 @@
+----resource governor setup
+--create resource pool
+create resource pool pool1
+with
+( min_cpu_percent=0,
+max_cpu_percent=20,
+min_memory_percent=0,
+max_memory_percent=20)
+go
+
+--create workload group
+create workload group group1
+using pool1 ;
+go
+
+--create classifier function
+create function dbo.df1()
+returns sysname
+with schemabinding
+as
+begin
+declare @group1 as sysname
+if(suser_name() = 'me')
+set @group1 = 'group1'
+else
+set @group1 = 'default'
+return @group1
+end
+go
+
+--alter governor with the classifer function
+alter resource governor
+with (classifier_function=dbo.df1);
+go
+alter resource governor reconfigure
+go
+
+
+--cleanup
+/*
+alter resource governor with (classifier_function = null)
+go
+alter resource governor disable
+go
+drop function dbo.df1
+go
+drop workload group group1
+go
+drop resource pool pool1
+go
+alter resource governor reconfigure
+go
+*/

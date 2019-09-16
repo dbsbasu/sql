@@ -1,0 +1,113 @@
+-- this query returns file info for the pointed database only, by default
+-- if you want to return data for the enrire instance, please comment out the db_name() statement
+set nocount on;
+if object_id('tempdb..#Space_Info') is not null drop table #Space_Info;
+GO
+
+
+declare @SpaceUnit char (2) ='MB';
+
+--uncomment one statement below, to indicate space unit as GB
+set @SpaceUnit = 'GB';
+
+declare @unit_conv numeric (20,16);
+if @SpaceUnit = 'GB'
+	set @unit_conv = 8.0/(1024.0*1024.0); 
+else
+	set @unit_conv = 8.0/(1024.0);        
+
+create table #Space_Info
+   ([id] int identity (0,1),
+    [DBName] [sysname] NULL, 
+    [FGId] [int] NULL, 
+    [FGOrder] [int] NULL, 
+    [FGName] [sysname] NULL, 
+    [file_id] [int] NULL, 
+    [Logical_name] [sysname] NULL, 
+    [Physicalphysical_name] [nvarchar](800) NULL, 
+    [PhysicalFilePath] [nvarchar](800) NULL, 
+    [Allocation] [decimal](12, 3) NULL, 
+    [SpaceUsed] [decimal](12, 3) NULL, 
+    [FreeSpace] [decimal](12, 3) NULL,
+    [%_FreeSpace] [decimal](12, 2) NULL,
+    [Growth] [decimal](12, 0) NULL,
+	[Growth_suffix] [varchar](10) NULL,
+    [max_size] [decimal](12, 3) NULL,
+    [IsDefaultFG] [int] NULL,
+    [IsReadOnlyFG] [int] NULL,
+	[PhysicalFile] [nvarchar](800) NULL,
+	[unit_conv] [numeric] (20,16) NULL,
+	[SpaceUnit] [char](2) NULL);
+
+insert into #Space_Info (unit_conv, SpaceUnit) values (@unit_conv, @SpaceUnit);
+
+EXEC sp_msForEachDB ' 
+if ''[?]'' in (''[ResourceDb]'') return
+if ''[?]'' not in (''''+quotename(db_name())+'''') return  --> comment out for entire instance
+use [?] 
+declare @unit_conv numeric (20,16), @SpaceUnit char (2) ='''';
+select @unit_conv = unit_conv, @SpaceUnit = SpaceUnit from #Space_Info where id = 0;
+insert into #Space_Info
+SELECT DB_NAME() as DBName
+,isnull(fg.data_space_id,0) as FGId
+,isnull(fg.data_space_id,99) AS FGOrder
+,isnull((fg.name + (case when(fg.is_default = 1) then ''  [Default]'' else '''' end)),''TranLog'') as FGName 
+,df.file_id as file_id, df.name as Logical_name
+,COALESCE(substring(df.physical_name, ((len(df.physical_name))-CHARINDEX((''\''), reverse(df.physical_name))+2), (len(df.physical_name))), df.physical_name) as Physicalphysical_name
+,COALESCE(substring(df.physical_name, 1, ((len(df.physical_name))-CHARINDEX((''\''), reverse(df.physical_name))+1)), df.physical_name) as PhysicalFilePath
+,convert(decimal(12,3),round(df.size*@unit_conv,3)) as Allocation 
+,convert(decimal(12,3),round(fileproperty(df.name,''SpaceUsed'')*@unit_conv,3)) as SpaceUsed 
+,convert(decimal(12,3),round((df.size-fileproperty(df.name,''SpaceUsed''))*@unit_conv,3)) as FreeSpace 
+,[%_FreeSpace] = convert(decimal(5,2),round((df.size-fileproperty(df.name,''SpaceUsed''))*100.00/df.size/1.00,2))
+,case when df.is_percent_growth = 1 then df.growth else df.growth*8.0/1024.0 end as Growth
+,case when df.is_percent_growth = 1 then ''%'' else ''MB'' end as Growth_suffix
+,case when df.growth > 0 and df.max_size <> -1 then convert(decimal(12,3),round(df.max_size*@unit_conv,3)) when df.growth > 0 and df.max_size = -1 then df.max_size else 0 end as max_size
+,isnull(fg.is_default,0) as IsDefaultFG, isnull(fg.is_read_only,0) as  IsReadOnlyFG
+,df.physical_name as PhysicalFile
+,@unit_conv 
+,@SpaceUnit
+FROM [?].sys.database_files df
+LEFT OUTER JOIN sys.filegroups fg
+ON df.data_space_id = fg.data_space_id;
+'
+--print space unit used
+select SpaceUnit from #Space_Info where id = 0;
+
+--per DB, FG, File
+SELECT [DBName], [FGName], [Logical_name], [PhysicalFilePath], [Physicalphysical_name], [Allocation], [SpaceUsed], [FreeSpace], [%_FreeSpace], max_size, cast(Growth as varchar(20)) + ' ' + Growth_suffix as 'Growth_MB_or_%'
+FROM #Space_Info
+--where DBName like 'tl_%'
+where id > 0
+order by DBName, FGOrder, [Logical_name];
+
+--per DB, FG
+SELECT [DBName], [FGId], [FGName], sum([Allocation]) as Allocation, sum([SpaceUsed]) as SpaceUsed 
+,sum([FreeSpace]) as FreeSpace
+,convert(decimal(5,2),(round(sum([FreeSpace])*100.00/sum([Allocation])/1.00,2))) as [%_Freespace]
+,[IsDefaultFG], [IsReadOnlyFG], count([FGId]) as total_file_count, sum(case when growth > 0 and (([FGId] > 0 and max_size = -1) or ([FGId] = 0 and max_size = 2097152)) then 1 else 0 end) as uncapped_file_count
+FROM #Space_Info
+where id > 0
+GROUP BY DBName, FGOrder, [FGId], FGName, [IsDefaultFG], [IsReadOnlyFG]
+order by DBName, FGOrder, [FGId], FGName;
+
+
+--per DB
+SELECT [DBName], 'Data' as FGType, sum([Allocation]) as Allocation, sum([SpaceUsed]) as SpaceUsed 
+,sum([FreeSpace]) as FreeSpace
+,convert(decimal(5,2),(round(sum([FreeSpace])*100.00/sum([Allocation])/1.00,2))) as [%_Freespace]
+FROM #Space_Info
+where id > 0 and FGId > 0
+GROUP BY DBName
+UNION
+SELECT [DBName], 'TranLog' as FGType, sum([Allocation]) as Allocation, sum([SpaceUsed]) as SpaceUsed 
+,sum([FreeSpace]) as FreeSpace
+,convert(decimal(5,2),(round(sum([FreeSpace])*100.00/sum([Allocation])/1.00,2))) as [%_Freespace]
+FROM #Space_Info
+where id > 0 and FGId = 0
+GROUP BY DBName
+order by DBName;
+
+
+if object_id('tempdb..#Space_Info') is not null drop table #Space_Info;
+GO
+

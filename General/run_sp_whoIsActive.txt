@@ -1,0 +1,3 @@
+DECLARE	@return_value int,@schema varchar(max)
+EXEC	@return_value = [DBAUtils].[dbo].[sp_WhoIsActive]
+--		@filter = p_carsUpdateTransHistorydb1, @filter_type = N'Database',@schema = @schema OUTPUT

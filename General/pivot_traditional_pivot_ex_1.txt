@@ -1,0 +1,29 @@
+declare @t1 table (id int identity (1,1),category char(8),amount INT, comments VARCHAR(20));
+INSERT into @t1(category,amount,comments) values ('blue',10,'here');
+INSERT into @t1(category,amount,comments) values ('blue',20,'your');
+INSERT into @t1(category,amount,comments) values ('green',30,'comments');
+INSERT into @t1(category,amount,comments) values ('green',30,'go');
+INSERT into @t1(category,amount,comments) values ('green',30,'in');
+INSERT into @t1(category,amount,comments) values ('green',40,'order');
+INSERT into @t1(category,amount,comments) values ('green',40,'to');
+INSERT into @t1(category,amount,comments) values ('green',40,'distinguish');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'which');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'row');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'is');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'having');
+INSERT into @t1(category,amount,comments) values ('red',60,'different');
+INSERT into @t1(category,amount,comments) values ('red',60,'values');
+INSERT into @t1(category,amount,comments) values ('red',70,'apart');
+INSERT into @t1(category,amount,comments) values ('red',80,'from');
+INSERT into @t1(category,amount,comments) values ('red',80,'keys');
+
+SELECT category, amount FROM @t1
+
+;with pivotTable as
+(
+select category, amount
+  from @t1
+)
+select * from pivotTable
+pivot (sum(amount) for category in ([blue],[green],[yellow],[red])) Pvt1
+

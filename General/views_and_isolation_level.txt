@@ -1,0 +1,29 @@
+--query window 1
+begin tran Update_Table_1
+update dbo.SubType  set IsActive = 0 
+--rollback tran Update_Table_1
+
+--query window 2
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+--SET TRANSACTION ISOLATION LEVEL READ COMMITTED
+begin tran Select_Table_2
+select  * from dbo.SubType 
+rollback tran Select_Table_2
+
+--query window 3
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED
+--SET TRANSACTION ISOLATION LEVEL READ COMMITTED
+begin tran Select_View_3
+select  * from dbo.vwLookUpSubTypes 
+rollback tran Select_View_3
+
+--query window 4: monitor locks
+
+
+/*
+However, I wanted to confirm that setting transaction isolation level on top of your session has its effect on the entire session regardless of object types. Views are not an exception. Unless the underlying table(s) were explicitly locked using table lock hints while defining the views, such as with (xlock) or similar. I have tested it just now. Again, the scope here is the entire session.
+
+There is an exception. Which is other way round, though. Table lock hints are more of local types. Let’s consider a table t1 having a computed column which is computed through expressions or functions based off of column(s) from another table t2. A no-lock hint on t1 will not have any effect on t2. That might cause undesired blocking. On the other hand, setting isolation level of read uncommitted for your session will have its effect on both tables t1 and t2. I believe I had tested this scenario in the past.
+
+Therefore, agreed, instead of relying on no lock hints, set isolation level of uncommitted. 
+*/

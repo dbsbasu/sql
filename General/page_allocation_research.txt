@@ -1,0 +1,113 @@
+set nocount on;
+--create table
+set ansi_nulls on
+go
+set quoted_identifier on
+go
+set ansi_padding on
+go
+drop table [dbo].[tablea]
+go
+create table [dbo].[tablea](
+	[id] [smallint] not null,
+	[comments] [char](69) collate sql_latin1_general_cp1_ci_as not null,
+ constraint [pk_tablea] primary key clustered 
+(
+	[id] asc
+)with (pad_index = off, statistics_norecompute = off, ignore_dup_key = off, allow_row_locks = on, allow_page_locks = on) on [primary]
+) on [primary]
+
+go
+set ansi_padding off
+go
+
+--add data
+declare @keyValue smallint,
+        @maxRows  smallint;
+
+set @keyValue = 1;
+set @maxRows  = @keyValue + 50;
+while (@keyValue < @maxRows)
+begin
+	insert into [dbo].[tablea] (id, comments) values (@keyValue, replicate('a',69));
+	set @keyValue = @keyValue + 1;
+end;
+
+go
+--add data
+declare @keyValue smallint,
+        @maxRows  smallint;
+
+set @keyValue = 501;
+set @maxRows  = @keyValue + 50;
+
+while (@keyValue < @maxRows)
+begin
+	insert into [dbo].[tablea] (id, comments) values (@keyValue, replicate('a',69));
+	set @keyValue = @keyValue + 1;
+end;
+
+
+
+select object_name(ddpa1.object_id) as objectName, ix1.name as indexName, ddpa1.page_type_desc, ddpa1.page_level, 
+cast(ddpa1.previous_page_file_id as varchar(10)) + ', ' + cast(ddpa1.previous_page_page_id as varchar(10)) as 'PREVIOUS_FileId_PageId', 
+cast(allocated_page_file_id as varchar(10)) + ', ' + cast(ddpa1.allocated_page_page_id as varchar(10))  as 'ALLOCATED_fileId_pageId', 
+cast(ddpa1.next_page_file_id as varchar(10)) + ', ' + cast(ddpa1.next_page_page_id as varchar(10)) as 'NEXT_FileId_PageId', 
+cast(ddpa1.extent_file_id as varchar(10)) + ', ' + cast(ddpa1.extent_page_id as varchar(10)) as 'extentFileId_PageId', 
+ddpa1.allocation_unit_type_desc,  ddpa1.rowset_id, ddpa1.allocation_unit_id,  ddpa1.has_ghost_records, ddpa1.page_free_space_percent
+from sys.dm_db_database_page_allocations(db_id(), object_id('dbo.testData'), null, null, 'DETAILED') ddpa1
+left outer join sys.indexes ix1 on ix1.object_id = ddpa1.object_id
+where ddpa1.is_allocated = 1
+order by 
+ddpa1.object_id, ix1.name, ddpa1.allocation_unit_id, 
+ddpa1.page_level desc,
+ddpa1.page_type_desc desc,
+allocated_page_file_id,
+ddpa1.allocated_page_page_id
+;
+
+
+
+
+
+--dbcc ind ('testdb1', 'tablea', 1); -- sql 2012 has go the ddpa dmv
+
+--delete data
+--delete from [dbo].[tablea] where id <= 10
+--select * from [dbo].[tablea] 
+
+
+--get page id from dmv / dbc ind and obtain page info usign dbcc pageinfo
+dbcc traceon (3604);
+dbcc page('testdb1', 1, 303, 3);
+--dbcc page ('testdb1', 1, 1, 3); --PFS
+dbcc traceoff (3604);
+
+
+go
+--add data
+declare @keyValue smallint,
+        @maxRows  smallint;
+
+set @keyValue = 201;
+set @maxRows  = @keyValue + 50;
+
+while (@keyValue < @maxRows)
+begin
+	insert into [dbo].[tablea] (id, comments) values (@keyValue, replicate('a',69));
+	set @keyValue = @keyValue + 1;
+end;
+
+go
+--add data
+declare @keyValue smallint,
+        @maxRows  smallint;
+
+set @keyValue = 301;
+set @maxRows  = @keyValue + 50;
+
+while (@keyValue < @maxRows)
+begin
+	insert into [dbo].[tablea] (id, comments) values (@keyValue, replicate('a',69));
+	set @keyValue = @keyValue + 1;
+end;

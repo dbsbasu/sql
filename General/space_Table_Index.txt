@@ -1,0 +1,83 @@
+--table szie (either clustered or heap)
+select 
+sc.name+'.'+ob.name as tableName
+,REPLACE(CONVERT(VARCHAR,CONVERT(MONEY,pt.[rows]),1), '.00','') AS Row_Count
+,case when ix.type_desc = 'heap' then ix.type_desc else lower(ix.type_desc) end as cluster_heap
+,case when al.type_desc = 'IN_ROW_DATA' then lower(al.type_desc) else al.type_desc end as aloc_unit_type_desc
+,al.total_pages, convert(decimal(12,3),round(al.total_pages*8.0/(1024.0*1024.0),3)) as total_pages_GB
+,al.used_pages, convert(decimal(12,3),round(al.used_pages*8.0/(1024.0*1024.0),3)) as used_pages_GB
+,al.data_pages, convert(decimal(12,3),round(al.data_pages*8.0/(1024.0*1024.0),3)) as data_pages_GB
+,ix.name as index_name
+,case when pt.data_compression_desc = 'none' then lower(pt.data_compression_desc) else pt.data_compression_desc end as data_compression_desc
+from sys.objects ob
+inner join sys.schemas as sc on sc.schema_id = ob.schema_id and sc.name <> 'sys'
+inner join sys.partitions pt on pt.object_id = ob.object_id
+inner join sys.allocation_units al on al.container_id = pt.partition_id 
+inner join sys.indexes ix on ix.index_id = pt.index_id and ix.object_id = pt.object_id and (ix.index_id IN (1, 0))
+where ob.[type] = 'u'
+order by sc.name asc, ob.name asc, al.type_desc asc
+
+--index size (all indexes except nonclustered)
+select 
+sc.name+'.'+ob.name as tableName
+,REPLACE(CONVERT(VARCHAR,CONVERT(MONEY,pt.[rows]),1), '.00','') AS Row_Count
+,ix.name as index_name
+,case when ix.type_desc = 'nonclustered' then lower(ix.type_desc) else ix.type_desc end as index_type
+,case when al.type_desc = 'IN_ROW_DATA' then lower(al.type_desc) else al.type_desc end as aloc_unit_type_desc
+,al.total_pages, convert(decimal(12,3),round(al.total_pages*8.0/(1024.0*1024.0),3)) as total_pages_GB
+,al.used_pages, convert(decimal(12,3),round(al.used_pages*8.0/(1024.0*1024.0),3)) as used_pages_GB
+,al.data_pages, convert(decimal(12,3),round(al.data_pages*8.0/(1024.0*1024.0),3)) as data_pages_GB
+,case when pt.data_compression_desc = 'none' then lower(pt.data_compression_desc) else pt.data_compression_desc end as data_compression_desc
+from sys.objects ob
+inner join sys.indexes ix on ix.object_id = ob.object_id and (ix.index_id > 1)
+inner join sys.partitions pt on pt.object_id = ob.object_id and pt.index_id = ix.index_id 
+inner join sys.allocation_units al on al.container_id = pt.partition_id 
+inner join sys.schemas as sc on sc.schema_id = ob.schema_id and sc.name <> 'sys'
+where ob.[type] = 'u'
+order by sc.name asc, ob.name asc, al.type_desc asc
+
+--------------------------------------
+--only if you have ddl_audit
+
+
+--table size
+select  
+ ISNULL(log1.DB_User, '<Unnamed>') AS Creator
+,sc.name+'.'+ob.name as Table_Name
+,REPLACE(CONVERT(VARCHAR,CONVERT(MONEY,pt.[rows]),1), '.00','') AS Row_Count
+,SUM(convert(decimal(12,2),round(al.total_pages*8.0/(1024.0*1024.0),2))) as Total_Space_GB
+,ISNULL(log1.PostTime,'1900-01-01 00:00:00.000') AS Create_Time
+from sys.objects ob
+inner join sys.schemas as sc on sc.schema_id = ob.schema_id and sc.name <> 'sys'
+inner join sys.partitions pt on pt.object_id = ob.object_id
+inner join sys.allocation_units al on al.container_id = pt.partition_id 
+inner join sys.indexes ix on ix.index_id = pt.index_id and ix.object_id = pt.object_id 
+LEFT OUTER JOIN dbo.dba_ddl_log log1 ON log1.ObjectName = ob.name AND log1.ObjectType = 'table' AND log1.[Event] = 'create_table' AND log1.ObjectSchemaName = sc.name AND log1.InsertDtDW = 
+(SELECT Max(log2.InsertDtDW)
+FROM dbo.dba_ddl_log log2 
+WHERE log2.ObjectName = log1.ObjectName AND log2.ObjectType = 'table' AND log2.[Event] = 'create_table' AND log2.ObjectSchemaName = log1.ObjectSchemaName)
+WHERE ob.[type] = 'u'
+GROUP BY ob.name, log1.DB_User, sc.name, pt.rows, log1.PostTime
+ORDER BY Total_Space_GB DESC
+
+
+
+--table count
+SELECT  
+ ISNULL(log1.DB_User, '<Unnamed>') AS Creator
+,SUM(convert(decimal(12,2),round(al.total_pages*8.0/(1024.0*1024.0),2))) as Total_Space_GB
+,COUNT(*) AS Count_of_table
+from sys.objects ob
+inner join sys.schemas as sc on sc.schema_id = ob.schema_id and sc.name <> 'sys'
+inner join sys.partitions pt on pt.object_id = ob.object_id
+inner join sys.allocation_units al on al.container_id = pt.partition_id 
+inner join sys.indexes ix on ix.index_id = pt.index_id and ix.object_id = pt.object_id 
+LEFT OUTER JOIN dbo.dba_ddl_log log1 ON log1.ObjectName = ob.name AND log1.ObjectType = 'table' AND log1.[Event] = 'create_table' AND log1.ObjectSchemaName = sc.name AND log1.InsertDtDW = 
+(SELECT Max(log2.InsertDtDW)
+FROM dbo.dba_ddl_log log2 
+WHERE log2.ObjectName = log1.ObjectName AND log2.ObjectType = 'table' AND log2.[Event] = 'create_table' AND log2.ObjectSchemaName = log1.ObjectSchemaName)
+WHERE ob.[type] = 'u' 
+GROUP BY log1.db_user
+ORDER BY total_space_GB desc
+
+

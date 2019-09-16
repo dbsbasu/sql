@@ -1,0 +1,41 @@
+--query window 1. RESULTS: noth ##globaltable and #localtable are visble within the same session
+declare @SQLQuery nvarchar(400);
+if exists (select 1 from tempdb.dbo.sysobjects where name = '##globaltable' and type in (N'u')) drop table ##globaltable;
+create table ##globaltable (ID int identity(1,1), comments varchar(37));
+insert into ##globaltable (comments) values ('I am global');
+
+if object_id('tempdb..#localtable') is not null drop table #localtable;
+create table #localtable (ID int identity(1,1), comments varchar(37));
+insert into #localtable (comments) values ('I am local');
+
+set @SQLQuery = '';
+set @SQLQuery = 'insert into ##globaltable (comments) values (''I am global. running dynamic sql''); waitfor delay ''0:0:10'';'
+exec sp_executesql @SQLQuery;
+set @SQLQuery = '';
+
+set @SQLQuery = '';
+set @SQLQuery = 'insert into #localtable (comments) values (''I am local. running dynamic sql''); waitfor delay ''0:00:10'';'
+exec sp_executesql @SQLQuery;
+set @SQLQuery = '';
+
+select * from ##globaltable;
+select * from #localtable;
+
+--query window 2
+--(1) copy below queries and paste into a second query window 
+--(2) uncomment the queries
+--(3) execute : RESULTS: ##globaltable is visble on the second query window, #localtable is not.
+--(4) disconnect query window 1 and execute: RESULTS: neither ##globaltable nor #localtable are visble on the second query window
+/*
+if exists (select 1 from tempdb.dbo.sysobjects where name = '##globaltable' and type in (N'u')) 
+	select * from ##globaltable
+else
+	select '##globaltable does not exist here'
+;
+
+if object_id('tempdb..#localtable') is not null 
+	select * from #localtable
+else
+	select '#localtable does not exist here'
+;
+*/

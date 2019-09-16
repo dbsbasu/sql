@@ -1,0 +1,65 @@
+declare @t1 table (id int identity (1,1),category char(8),amount INT, comments VARCHAR(20));
+INSERT into @t1(category,amount,comments) values ('blue',10,'here');
+INSERT into @t1(category,amount,comments) values ('blue',20,'your');
+INSERT into @t1(category,amount,comments) values ('green',30,'comments');
+INSERT into @t1(category,amount,comments) values ('green',30,'go');
+INSERT into @t1(category,amount,comments) values ('green',30,'in');
+INSERT into @t1(category,amount,comments) values ('green',40,'order');
+INSERT into @t1(category,amount,comments) values ('green',40,'to');
+INSERT into @t1(category,amount,comments) values ('green',40,'distinguish');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'which');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'row');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'is');
+INSERT into @t1(category,amount,comments) values ('yellow',50,'having');
+INSERT into @t1(category,amount,comments) values ('red',60,'different');
+INSERT into @t1(category,amount,comments) values ('red',60,'values');
+INSERT into @t1(category,amount,comments) values ('red',70,'apart');
+INSERT into @t1(category,amount,comments) values ('red',80,'from');
+INSERT into @t1(category,amount,comments) values ('red',80,'keys');
+
+--find duplicate counts from above
+;WITH cte_dupe1 AS (
+SELECT Row_Number() over (partition by category, amount order by category, amount) as RowNumber_dupe, * 
+FROM @t1)
+SELECT cte_dupe1.category, cte_dupe1.amount, COUNT(cte_dupe1.RowNumber_dupe) AS dupe_count
+FROM cte_dupe1
+WHERE RowNumber_dupe > 1
+GROUP BY cte_dupe1.category, cte_dupe1.amount
+ORDER BY cte_dupe1.category, cte_dupe1.amount;
+
+
+--find duplicate... display records if there is any duplicate data for category and amount
+;WITH cte_dupe1 AS (
+SELECT Row_Number() over (partition by category, amount order by category, amount) as RowNumber_dupe, * 
+FROM @t1)
+SELECT cte_dupe1.id, cte_dupe1.category, cte_dupe1.amount, cte_dupe1.RowNumber_dupe FROM cte_dupe1
+WHERE RowNumber_dupe > 1
+ORDER BY cte_dupe1.id asc;
+
+
+--find duplicate... display all records, original and duplicates
+;WITH cte_dupe1 AS (
+SELECT Row_Number() over (partition by category, amount order by category, amount) as RowNumber_dupe, * 
+FROM @t1)
+SELECT t1.*, cte_dupe1.RowNumber_dupe
+FROM cte_dupe1 cte_dupe1
+INNER JOIN @t1 t1 ON t1.category = cte_dupe1.category AND t1.amount = cte_dupe1.amount 
+AND cte_dupe1.RowNumber_dupe > 1
+AND cte_dupe1.RowNumber_dupe = (SELECT MAX(cte_dupe2.RowNumber_dupe) FROM cte_dupe1 cte_dupe2 WHERE cte_dupe2.category = cte_dupe1.category AND cte_dupe2.amount = cte_dupe1.amount)
+ORDER BY t1.id asc;
+
+
+-- other rankings
+SELECT Row_Number() over (order by amount) as RowNumber_orderAmount, * from @t1;
+select Row_Number() over (partition by category order by amount) as RowNumber_partitionCategory_orderAmount, * from @t1;
+select RANK() over (order by amount) as Rank_orderAmount, * from @t1; 
+select RANK() over (partition by category order by amount) as Rank_partitionCategory_orderAmount, * from @t1;
+select DENSE_RANK() over (order by amount) as DenseRank_orderAmount, * from @t1; -- I love dense rank
+select DENSE_RANK() over (partition by category order by amount) as DenseRank_partitionCategory_orderAmount, * from @t1;
+select Ntile(4) over (order by amount) as NTile_orderAmount, * from @t1;
+;with cte1 as (select Ntile(10) over (order by amount) as NTile1, * from @t1) 
+      select AVG(amount) as NTile_orderAmount_CTE_Avg from cte1 where NTile1 between 5 and 6;
+select t1.*, 'second highest' from @t1 t1 
+      inner join (select dense_rank() over (order by amount desc) as dr1, * from @t1) as t2 on t2.id = t1.id and t2.dr1 = 2;
+
+

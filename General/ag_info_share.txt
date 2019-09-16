@@ -1,0 +1,102 @@
+AlwaysOn Availability Groups High-Level Knowledge Share
+
+Part 1: What is AG?
+
+AlwaysOn Availability Groups is an HADR solution that allows a set or sets of user databases to stay in sync and failover together.
+Note: AG uses the Windows Failover Cluster Service to do this; so a WSFC is required to implement AG until SQL Server 2017 releases. 
+The Systems Engineering team has the con on setting the failover cluster service up.
+
+How does it work?
+
+At a high level, AlwaysOn replicates log blocks from a primary replica to one or more secondary replicas. (For clarity's sake when I refer to a replica, I'm referring to an instance of SQL Server not an individual database.)
+
+This method allows a given set of secondary servers to be sync'd to prod in near real-time without the inability to read, due to the fact that databases in AG never go into a restoring state.
+This is because the transactions are effectively being replayed in real time; as opposed to restoring from log backups.
+
+It's important to note that on a server with AG, you are still able to take standard log backups and in fact, 
+you should because AG itself won't clear the log file by itself, only its the portion reserved for its send queue and redo queue.
+You should also leave the copy log backup jobs running on all secondaries so that they are readily accessible.
+Technically, you can also leave the restore log jobs running; they won't hurt anything and in the event that database is removed from the group, the restore jobs will start working 
+on their next scheduled run time automatically.
+
+How does AG break? To understand this, we have to talk a bit about the redo and send queues.
+
+Part 2: The Queues
+
+Two core mechanisms that are important to learn in order to support a system with AG are the Log Send Queue and the Redo Queue.
+
+The data flow goes something like this: log blocks are generated and stored in the send queue which is located in the log file of a given primary database.
+These log blocks then make their way from the send queue to the redo queue which is located in the log file of a given secondary database.
+After the primary has sent all of the log blocks, the space occupied in its log file for the log send queue will be cleared.
+Likewise, after the secondary has redone all of the log blocks, or in other words replayed all of the changes, the space occupied in its log file for the redo queue will also be cleared.
+
+If data movement is manually suspended, transfers too slowly, the redo thread is blocked, a disk goes offline, etc., you run the risk of filling up the log file on either side.
+
+--repeat but suspend data movement on primary
+--explain that schema changes on the primary may result in the same effect, as will a redo thread being blocked
+
+Note: If a secondary replica goes down, it's important to work with the Server Engineer to determine how long the box will be down so that you can make the decision to remove that replica from the configuration or not temporarily.
+The reason being is that the primary replica will retain log blocks in its send queue until all secondary replicas have received them; regardless if that replica is online or not.
+
+The amount of time you should allow a secondary to go down depends on your workload. In my experience, DW (an OLAP system) is totally fine if a secondary were to go down for 30 minutes if it happens in the between 12 and 3am.
+In a highly transactional system however; this may not be the case.
+
+
+Part 3: Sync vs Async/Failing Over
+
+When it comes to configuring AG, you have two choices as to how the data is synchronized.
+
+In a Synchronous AG config, in order for a transaction to be committed on the primary, the secondary must send an acknowledgement to the primary that it has committed the transaction there.
+This ensures that data on the secondary replica is always up to date*
+Unfortunately, this waiting around introduces some latency to every write operation that occurs on the primary. 
+According to Microsoft, this has been reduced to a single digit percentage difference in performance on SQL Server 2016; whereas older versions aren't quite so fast.
+
+If you don't need real time data, and you value write performance over the ability to automatically failover you should disregard synchronous mode.
+
+In asynchronous mode, the only difference is that the secondary doesn't need to send that acknowledgement to the primary for a transaction to commit on the primary.
+In asynchronous mode, you can no longer failover automatically, nor can you failover manually without data loss unless you've communicated with the application teams to have them stop their apps.
+
+Part 4: Useful Queries/DMVs for Troubleshooting/Our custom AG monitoring alerts-
+
+select db_name(drs.database_id) AS [database_name], ag.name AS [ag_name], ar.replica_server_name, drs.synchronization_state_desc, drs.synchronization_health_desc, drs.log_send_queue_size, drs.redo_queue_size, drs.secondary_lag_seconds
+ from sys.dm_hadr_database_replica_states AS drs
+  join sys.availability_replicas AS ar ON drs.replica_id = ar.replica_id
+  join sys.availability_groups AS ag ON ag.group_id = drs.group_id
+  ORDER BY [database_name] asc, replica_server_name asc
+
+The query above when run on the primary replica will provide the dbname, replica(server) name, sync state, sync health, log send queue size, redo queue size, log send rate, redo rate, and secondary lag in seconds
+
+This can be useful to look at when there is an alert for one of the queues filling up for a given db as it filters out all of the columns from the original dmv that aren't as useful for troubleshooting
+For example, if the redo/log send queue is high and the redo/log rates are low for a given database across ALL nodes, you've narrowed down to high write activity or a redo thread being blocked
+In the event that only one of the replicas in this scenario is behind, it's more likely that there is a problem with the disk on that server or that it's a network issue because high write activity/redo thread blocking would affect all secondaries
+
+Alternatively you can right click the alwayson High Availability Node, select show dashboard and add whatever columns you need to troubleshoot.
+
+In the event that one of the secondaries fall so far behind that they are no longer synchronizing; it's time to use t log shipping to catch it up.
+
+To remove a given database from the AG group simply issue the following command on the affected secondary/ies:
+
+ALTER DATABASE (DBName Here) SET HADR OFF;
+
+You can then turn on the log shipping restore job for that database and monitor its progress
+
+select * from msdb..log_shipping_monitor_secondary where secondary_database = '(DBName here)'
+
+Once it's caught up, issue an adhoc log backup on the primary for the affected database and then disable the backup job on the primary (can be done in job activity monitor)
+
+Finally, issue the following command on the affected secondary/ies:
+
+ALTER DATABASE (DBName Here) SET HADR AVAILABILITY GROUP = (name of AG group here)
+
+This will attempt to join the database back into AG, and as long as tlog shipping isn't too far behind it should join it in less than 30 seconds
+
+After that, just enable the backup log job again on the primary and your golden!
+------------------------------------------------------------------------------------
+
+While you're doing your troubleshooting you're probably going to want to disable our custom alert on all 4 replicas, so that you don't receive a page every minute
+
+To do this, look for a job called 'System - Check AlwaysOn Status' and disable it
+
+Also check for a SQL Server Agent Alert named 'Policy Violation' and disable that as well
+
+But make sure to reenable them after the issue is fixed!

@@ -1,0 +1,35 @@
+
+/*
+
+--1-- define distributor
+--2-- create publication DBsuTest_Pub_1 with BOTH options unchecked for snapshot
+--3-- make sure Publication --> Subscription Options --> Allow initialization from backup files --> True
+
+--4--backup -- (connect to publisher server)
+ BACKUP DATABASE 
+
+--5--restore -- (connect to subscriber server) 
+RESTORE DATABASE
+authorization on database :: DBsuTest to sa
+
+
+--6-- create subscriber (connect to publisher server)
+USE [DBsuTest] --publisher database
+GO
+EXEC sp_addsubscription 
+@publication = DBsuTest_Pub_1, 
+@subscriber = subscriber_server_name, 
+@destination_db = DBsuTest_Replicated,
+@sync_type = 'initialize with backup',
+@backupdevicetype ='disk',
+@backupdevicename = '\\path\DBsuTest.bak'
+
+
+--7-- verify that there is no snapshot created in snapshot folder
+
+*/
+
+
+
+
+

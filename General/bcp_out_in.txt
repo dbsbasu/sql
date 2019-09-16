@@ -1,0 +1,26 @@
+make sure that no data update/add happens after 1 am backup and until the whole transform is completed
+
+inform app team that this table will be completely unavaible during the operation
+
+bcp out. data file being created into the scratch disk
+
+C:\>bcp database_name.schema_name.table_name out D:\file_name.dat -T -c
+
+save tabe definition
+add clustered index as requested
+rename/drop original table
+create new table (same FG, anyway)
+
+bcp-in into the newly created table from the dat file
+
+C:\>bcp database_name.schema_name.table_name in D:\file_name.dat -T -c -E -b 500000
+
+-E option for retaining original identity values (if any)
+
+Note: 7.1 GB of table was bcp-out into a 3.8 GB of data file in dev. 
+
+
+Important: test in non-prod. make sure app team verifies that identity columns retain the original values. app works.
+
+-- table definition
+

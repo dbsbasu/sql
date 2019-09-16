@@ -1,0 +1,55 @@
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+ALTER PROCEDURE [dbo].[SQL_StatsREPORT] (@dbname Varchar(100)=NULL, @Command Varchar(50) = NULL) AS
+SET NOCOUNT ON
+
+-- Author: Saleem Hakani (Microsoft Corporation)
+-- Date: Dec 17th 2006 
+-- Description: This procedure helps in finding out how many records were inserted/updated/deleted since the last time statistics were updated
+-- Disclaimer: This script, is provided for informational purposes only and SQL Server Community (aka: WWW.SQLCOMMUNITY.COM) or the author of this script makes no warranties, 
+-- either express or implied. This script, scenarios and other external web site references, is subject to change without notice. 
+-- The entire risk of the use or the results of the use of this script remains with the user.
+
+If (@DBName is null or @DBName = 'HELP' or @Command='HELP')
+Begin
+	Print 'HELP for SQL_StatsREPORT'
+	Print '======================='
+	Print ''
+	Print 'This procedure helps in finding how many records were inserted/updated/deleted since the last time statistics were updated on tables'
+	Print ''
+	Print 'SYNTAX: Exec SQL_StatsREPORT <@DBName>, <@Command>'
+	Print '@DBName: is any valid and existing database on the system (It should not be a mirror database)'
+	Print '@Command: Can be HELP or EXECUTE'
+	Print ''
+	Print 'To obtain report on how many tables were changed since the last time statistics were updated?'
+	Print 'EXAMPLE: Exec SQL_StatsREPORT @DBName=''SQLTips'',@Command=''REPORT'''
+	Print ''
+	Print 'To get the commands on tables that require statistics to be updated from the passed database'
+	Print 'EXAMPLE: Exec SQL_StatsREPORT @DBName=''SQLTips'',@Command=''EXECUTE'''
+	Print ''
+End
+
+Declare @qry varchar(2000)
+
+IF (@DBName <> 'HELP' and @Command = 'REPORT')
+Begin
+set @qry = ' Use [' + @dbName +'] SELECT substring(o.name,1,50) AS [table name], substring(i.name,1,50) AS [Index Name], i.rowmodctr AS [Rows Modified] 
+FROM SYSOBJECTS o JOIN SYSINDEXES i 
+ON o.id = i.id 
+WHERE i.rowmodctr > 0 and o.xtype = ''U''
+ORDER BY i.rowmodctr DESC'
+exec (@qry)
+End
+
+IF (@DBName <> 'HELP' and @Command = 'EXECUTE')
+Begin
+Print space(10)+' Run the Update Statistics on the following Tables'
+SET @qry = 'SET NOCOUNT ON'+char(13)+ 'Use [' + @dbName + '] SELECT Distinct ''USE ['+@DBNAME+'] UPDATE STATISTICS''+SPACE(1)+O.NAME+CHAR(13)+''GO'' FROM SYSOBJECTS O 
+JOIN SYSINDEXES i ON o.id = i.id 
+WHERE i.rowmodctr > 0 and o.xtype = ''U''
+---ORDER BY O.NAME'
+exec (@qry)
+End
+

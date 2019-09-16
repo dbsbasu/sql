@@ -1,0 +1,80 @@
+-- get Existing PF, PS, boundary, table, column
+SELECT  distinct pf.name AS 'Partition_Function', pf.type_desc 'Partition_Type', parm.parameter_id 'Parm_Id', ty.name 'Data_Type', pf.boundary_value_on_right, pf.fanout 'Total_Partitions', ps.name AS 'Partition_Scheme', schema_name(schema_id) as 'SchemaName', object_name(tb.object_id) as 'Table_Name', cl.name
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.partition_functions pf with (nolock)
+ON pf.function_id = ps.function_id
+inner join sys.partition_parameters parm
+on parm.function_id = pf.function_id
+inner join dbo.systypes ty 
+on ty.xusertype = parm.system_type_id
+INNER JOIN sys.indexes AS ix with (nolock) 
+ON ix.data_space_id = ps.data_space_id
+inner join sys.tables AS tb with (nolock)
+ON tb.object_id = ix.object_id
+join  sys.index_columns  ic ON ic.partition_ordinal = 1 and ic.index_id = ix.index_id and ic.object_id = tb.object_id
+join  sys.columns  cl ON cl.object_id = ic.object_id and cl.column_id = ic.column_id
+ORDER BY Partition_Function, Partition_Scheme;
+
+
+
+
+-- get Existing PFs
+SELECT  distinct pf.name AS 'Partition_Function', pf.type_desc 'Partition_Type', parm.parameter_id 'Parm_Id', ty.name 'Data_Type', pf.boundary_value_on_right, pf.fanout 'Total_Partitions', psc.name AS 'Partition_Scheme', fg.name AS FGName
+FROM sys.partition_schemes AS psc  with (nolock)
+INNER JOIN sys.partition_functions pf with (nolock) ON pf.function_id = psc.function_id
+INNER JOIN sys.destination_data_spaces AS dds  with (nolock) ON dds.partition_scheme_id = psc.data_space_id
+INNER JOIN sys.filegroups AS fg with (nolock) ON fg.data_space_id = dds.data_space_id
+INNER join sys.partition_parameters parm
+on parm.function_id = pf.function_id
+inner join dbo.systypes ty 
+on ty.xusertype = parm.system_type_id
+ORDER BY Partition_Function, Partition_Scheme;
+
+
+
+--get page allocations, row count per partition
+SELECT	 OBJECT_SCHEMA_NAME(pt.object_Id)+'.'+OBJECT_NAME(pt.object_id) AS objectName, pt.object_id, pt.index_id, ix1.name AS indexName, ix1.type_desc AS indexType, psc.name + ' ' + 
+pf.name + ' ' + CAST(ISNULL(prv.value,'catchAll') AS VARCHAR(10)) AS partition_Scheme_Function_RangeValue
+		,pt.partition_id, pt.partition_number, pt.rows 
+		,ddpa1.allocated_page_file_id, COUNT(ddpa1.allocated_page_page_id) AS pageCounts, ddpa1.page_type_desc, ddpa1.page_level
+FROM		sys.partitions pt
+INNER join sys.indexes ix1 ON ix1.object_id = pt.object_id AND ix1.index_id = pt.index_id
+INNER JOIN sys.partition_schemes as psc  with (nolock) on psc.data_space_id = ix1.data_space_id
+INNER JOIN sys.partition_functions pf with (nolock) ON pf.function_id = psc.function_id
+LEFT OUTER JOIN sys.partition_range_values prv with (nolock) ON prv.function_id = pf.function_id AND prv.boundary_id = pt.partition_number
+LEFT outer JOIN	sys.dm_db_database_page_allocations(db_Id(), object_Id('dbo.testData'), null, null, 'DETAILED') ddpa1 ON ddpa1.database_id = DB_ID() AND ddpa1.object_id = pt.object_id AND ddpa1.index_id = pt.index_id AND ddpa1.rowset_id = pt.partition_id
+WHERE object_schema_name(pt.object_Id) = 'dbo'
+AND	  OBJECT_NAME(pt.object_id) = 'testData' 
+AND ISNULL(ddpa1.page_type_desc, 'data_page') = 'data_page'
+GROUP BY OBJECT_SCHEMA_NAME(pt.object_Id), OBJECT_NAME(pt.object_id), pt.object_id, pt.index_id, ix1.name, ix1.type_desc, psc.name + ' ' + pf.name + ' ' + CAST(ISNULL(prv.value,'catchAll') AS VARCHAR (10))
+,pt.partition_id, pt.partition_number, pt.rows 
+,ddpa1.allocated_page_file_id, ddpa1.page_type_desc, ddpa1.page_level
+ORDER BY  OBJECT_SCHEMA_NAME(pt.object_Id), OBJECT_NAME(pt.object_id), pt.object_id, pt.index_id, ix1.name, ix1.type_desc, psc.name + ' ' + pf.name + ' ' + CAST(ISNULL(prv.value,'catchAll') AS 
+VARCHAR(10))
+,pt.partition_id, pt.partition_number, pt.rows 
+,ddpa1.allocated_page_file_id, ddpa1.page_type_desc, ddpa1.page_level
+
+
+
+
+-- get Check Constraint Info 
+select ob.name as 'ObjectName', ck.[name] AS 'Check_Name', cl.[name] AS 'Check_Column', ck.[definition] AS 'Check_Definition'
+from sys.check_constraints ck with (nolock)
+	inner join sys.objects ob with (nolock)
+	on ob.object_id = ck.parent_object_id
+	inner join sys.columns cl with (nolock)
+	on ob.object_id = cl.object_id
+	and cl.column_id = ck.parent_column_id
+	WHERE 
+		ob.type in (N'U')
+	and ck.type LIKE 'C'
+	and ob.name in 
+(
+   -- PS and tables
+SELECT  distinct object_name(tb.object_id)
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.indexes AS ix with (nolock) 
+ON ix.data_space_id = ps.data_space_id
+inner join sys.tables AS tb with (nolock)
+ON tb.object_id = ix.object_id
+);

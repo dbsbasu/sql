@@ -1,0 +1,41 @@
+DDL triggers, like regular triggers, fire stored procedures in response to an event. However, unlike DML triggers, they do not fire in response to UPDATE, INSERT, or DELETE statements on a table or view. Instead, they fire in response to a variety of Data Definition Language (DDL) statements. These statements are primarily statements that start with CREATE, ALTER, and DROP. DDL triggers can be used for administrative tasks such as auditing and regulating database operations.
+Use DDL triggers when you want to do the following: 
+You want to prevent certain changes to your database schema. 
+You want something to occur in the database in response to a change in your database schema. 
+You want to record changes or events in the database schema.
+
+
+Examples include:
+
+Preventing dropped tables from your database schema:
+
+CREATE TRIGGER stop_drop
+ON DATABASE
+FOR DROP_TABLE
+AS
+          PRINT ‘You must disable trigger ‘stop_drop’ to drop tables’;
+ROLLBACK;
+GO
+
+
+Send a message that an alter table statement has been issued:
+
+CREATE TRIGGER notify_on_alter
+ON DATABASE
+FOR ALTER_TABLE
+AS
+          PRINT ‘A table in the schema has just been altered’
+GO
+
+
+Track changes or events in the database schema:
+
+CREATE TRIGGER audit_schema_changes
+ON DATABASE
+FOR DDL_TABLE_EVENTS
+AS
+            INSERT ddl_log (PostTime, DB_User, Event, TSQL) VALUES 
+            (GETDATE(), CONVERT(nvarchar(100), CURRENT_USER), 
+            @data.value('(/EVENT_INSTANCE/EventType)[1]', 'nvarchar(100)'), 
+            @data.value('(/EVENT_INSTANCE/TSQLCommand)[1]', 'nvarchar(2000)') );
+GO

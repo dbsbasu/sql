@@ -1,0 +1,5 @@
+SELECT OBJECT_SCHEMA_NAME(sed.referencing_id)+'.'+OBJECT_NAME(sed.referencing_id) AS 'Refereccing_Entity',
+sed.referencing_class_desc,
+ISNULL(sed.referenced_server_name,'-') AS CrossServer, ISNULL(sed.referenced_database_name,'-') AS CrossDatabase, +sed.referenced_schema_name+'.'+sed.referenced_entity_name Referencing_Entity, sed.referenced_class_desc
+FROM sys.sql_expression_dependencies sed
+ORDER BY OBJECT_SCHEMA_NAME(sed.referencing_id)+'.'+OBJECT_NAME(sed.referencing_id)

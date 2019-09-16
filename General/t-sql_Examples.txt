@@ -1,0 +1,956 @@
+-----------------------------------------------------
+--- insert, update, delete
+INSERT INTO dbo.Employees
+           (LastName
+           ,FirstName)
+output inserted.employeeid, inserted.LastName, inserted.FirstName
+     VALUES
+           ('Basu'
+           ,'Debasis')
+
+
+select scope_identity()
+select * from dbo.Employees
+
+
+
+INSERT INTO dbo.Employees
+           (LastName
+           ,FirstName)
+output inserted.employeeid, inserted.LastName, inserted.FirstName
+SELECT SUBSTRING(cust.ContactName,charindex(' ',cust.ContactName)+1,99) 
+	,
+      SUBSTRING(cust.ContactName,1,charindex(' ',cust.ContactName)-1)
+  FROM dbo.Customers cust
+  
+  delete from dbo.Employees
+  output deleted.employeeid, deleted.LastName, deleted.FirstName
+  where employeeid > 91
+  
+  
+  SELECT * into dbo.#temp3	--temp tables will clear out when connections goes away. so one does not have to clean up
+    from dbo.Orders			
+  where  OrderID = 99999999--just to reate the table structure, put in a where clause that does not retrieve any data
+  select * from dbo.#temp3
+
+-- selective delete
+ SELECT * into dbo.#temp2
+ from dbo.Orders			
+    
+ delete from #temp2
+ output deleted.*
+ where year(orderdate) = 1997
+ 
+ select * from dbo.#temp2
+ where year(orderdate) = 1997
+ 
+ drop table dbo.#temp2
+
+-- delete based on other table data
+SELECT * into dbo.#temp4
+ from dbo.Customers		
+
+select * from dbo.#temp4
+
+delete from dbo.#temp4
+output deleted.*
+--select t.*
+  from dbo.Customers c
+  inner join dbo.#temp4 t
+  on c.CustomerID = t.customerid
+ where c.CompanyName like 'B%'
+ 
+  drop table dbo.#temp4
+  
+-- update
+select * from dbo.#temp4
+
+update dbo.#temp2
+   set employeeid = 10 
+      ,orderdate = GETDATE()
+ where employeeid = 5
+ 
+ --
+ 
+ 
+ update t
+    set t.shipname = c.CompanyName  
+--??--    output updated.*
+ --select t.* 
+    from dbo.#temp2 t
+   inner join dbo.Customers c
+   on c.CustomerID = t.CustomerID
+   
+
+begin tran		-- allows nested begin
+commit tran		-- allows nested commit
+rollback tran	-- does NOT allow nested tran rollback. 
+-- one rollback rolls back all trans that were began in nested loop starting from the first begin tran
+-- even if any intermediate tran was committed
+
+
+
+-----------------------------------------------------
+--- CTE
+delete from dbo.Employees
+where EmployeeID > 9
+
+select * from dbo.Employees
+
+
+;with employeeCTE as
+(
+	-- seed query
+	select 1 as orgLevel
+		  ,e.employeeId 
+		  ,e.LastName + ', ' + e.firstname as emplyeeName
+		  ,e.ReportsTo
+		  ,m.lastname + ', ' + m.firstname as managerName
+	  from dbo.Employees e
+	  left join dbo.Employees m
+	  on e.ReportsTo = m.EmployeeID
+	 where e.ReportsTo is null
+	 -- reursion
+	 union all
+	 select cte.orgLevel + 1
+		  ,e.employeeId 
+		  ,e.LastName + ', ' + e.firstname as emplyeeName
+		  ,e.ReportsTo
+		  ,cte.emplyeeName
+	   from dbo.Employees e
+	   inner join employeeCTE cte
+	   on e.ReportsTo = cte.EmployeeID 
+)
+select * from employeeCTE
+order by orgLevel
+
+
+
+-----------------------------------------------------
+--- Enable SQLCLR
+use master
+exec sp_configure 'clr enabled'
+
+exec sp_configure 'clr enabled', 1
+
+reconfigure with override
+
+
+
+
+-----------------------------------------------------
+--- Function
+drop function dbo.MostRecentOrders
+go
+
+create function dbo.MostRecentOrders(@custId nchar(5))
+returns table as
+return select top 3 orderId, orderDate
+		 from dbo.orders
+		where customerId = @custId
+		order by orderId desc 
+
+go
+
+select * from dbo.MostRecentOrders('ALFKI')
+select * from dbo.MostRecentOrders('QUICK')
+select * from dbo.MostRecentOrders('PARIS')
+
+-- join 
+select * 
+from dbo.MostRecentOrders(c.customerId)
+    ,dbo.customers c
+
+-- use the APPLY operator (since sql serve 2005)
+select c.CustomerID, c.CompanyName, mro.*
+  from dbo.customers c
+  cross apply dbo.MostRecentOrders(c.customerId) as mro
+
+select c.CustomerID, c.CompanyName, mro.*
+  from dbo.customers c
+  outer apply dbo.MostRecentOrders(c.customerId) as mro
+  
+select c.CustomerID, c.CompanyName, isnull(mro.orderId,0), isnull(mro.orderDate,'1901-01-01 00:00:00.000')
+  from dbo.customers c
+  outer apply dbo.MostRecentOrders(c.customerId) as mro
+  
+
+
+
+-----------------------------------------------------
+--- misc hello
+SELECT * FROM Employees
+
+SELECT [CustomerID]
+      ,[CompanyName]
+      ,[ContactName]
+      ,[ContactTitle]
+      ,[Address]
+      ,[City]
+      ,[Region]
+      ,[PostalCode]
+      ,[Country]
+      ,[Phone]
+      ,[Fax]
+  FROM [Northwind].[dbo].[Customers]
+WHERE CustomerID = 'QUICK'
+
+
+SELECT od.Discount FROM [Order Details] od
+
+SELECT @@VERSION  /*@@ = GLOBAL FUNCTIONS*/
+
+select newid()
+select NEWSEQUENTIALID()	/*sequential - helps when bulk insert made, index is not affected */
+select dataLength(newid())
+/*print dataLength(newid())*/
+
+
+insert dbo.identity_test values ('d')
+-- this returns bad values when this table has triggers that has inserts
+print @@IDENTITY		-- don't use this one
+print scope_identity()	-- use this instead
+
+
+declare @mytable1 table
+(
+	 uid1 uniqueidentifier
+	,name char (20)
+)
+insert into @mytable1 (uid1, name) values (NEWID(),'Cathy Luttmer1')
+insert into @mytable1 (uid1, name) values (NEWID(),'Cathy Luttmer2')
+insert into @mytable1 (uid1, name) values (NEWID(),'Cathy Luttmer3')
+select * from @mytable1
+
+declare @mytable2 table
+(
+	 uid1 uniqueidentifier default NEWSEQUENTIALID()
+	,name char (20)
+)
+insert into @mytable2(name) values ('Cathy Luttmer1')
+insert into @mytable2(name) values ('Cathy Luttmer2')
+insert into @mytable2(name) values ('Cathy Luttmer3')
+select * from @mytable2
+
+
+
+-----------------------------------------------------
+--- pivot
+select * from dbo.Orders
+
+-- create source table that has 3 columns for row source, column source and aggregate
+;with pivotsource as
+(
+select o.CustomerID
+	  ,YEAR(o.OrderDate) as orderYear
+	  ,totalSales = cast(
+						(select sum(quantity*unitprice*(1-discount)) 
+						   from dbo.[Order Details] od 
+						  where od.OrderID = o.OrderID) 
+						as money)
+  from dbo.Orders o
+)
+select * from pivotsource
+pivot (sum(totalSales) for orderYear in ([1996],[1997],[1998])) Pvt1
+
+
+-----------------------------------------------------
+--- ranking
+declare @t1 table (id int identity (1,1),category char(8),amount int);
+insert into @t1(category,amount) values ('blue',10);
+insert into @t1(category,amount) values ('blue',20);
+insert into @t1(category,amount) values ('green',30);
+insert into @t1(category,amount) values ('green',30);
+insert into @t1(category,amount) values ('green',30);
+insert into @t1(category,amount) values ('green',40);
+insert into @t1(category,amount) values ('yellow',50);
+insert into @t1(category,amount) values ('red',60);
+insert into @t1(category,amount) values ('red',60);
+insert into @t1(category,amount) values ('red',70);
+insert into @t1(category,amount) values ('red',80);
+insert into @t1(category,amount) values ('red',80);
+--select * from @t1;
+select Row_Number() over (order by amount) as RowNumber_orderAmount, * from @t1;
+select Row_Number() over (partition by category order by amount) as RowNumber_partitionCategory_orderAmount, * from @t1;
+select RANK() over (order by amount) as Rank_orderAmount, * from @t1; 
+select RANK() over (partition by category order by amount) as Rank_partitionCategory_orderAmount, * from @t1;
+select DENSE_RANK() over (order by amount) as DenseRank_orderAmount, * from @t1; -- I love dense rank
+select DENSE_RANK() over (partition by category order by amount) as DenseRank_partitionCategory_orderAmount, * from @t1;
+select Ntile(4) over (order by amount) as NTile_orderAmount, * from @t1;
+;with cte1 as (select Ntile(10) over (order by amount) as NTile1, * from @t1) 
+      select AVG(amount) as NTile_orderAmount_CTE_Avg from cte1 where NTile1 between 5 and 6;
+select t1.*, '4 highest' from @t1 t1 
+      inner join (select dense_rank() over (order by amount desc) as dr1, * from @t1) as t2 on t2.id = t1.id and (t2.dr1 = 1 or t2.dr1 = 2 or t2.dr1 = 3 or t2.dr1 = 4);
+
+
+select * from (select dense_rank() over (order by t1.amount desc) as dr, * from @t1 t1) as t2 where t2.dr = 1 or t2.dr = 3 -- 1st and 3rd highest (BEST)
+
+
+-----------------------------------------------------
+--- merge
+--select BEFORE
+select A.*, C.* from dbo.Accounts A
+left outer join dbo.Charges C
+on C.Cust_ID = A.Cust_ID
+union
+select  A2.*, C2.* from dbo.Charges C2
+left outer join dbo.Accounts A2
+on C2.Cust_ID = A2.Cust_ID
+order by A.Cust_ID Asc;
+
+--MERGE
+MERGE INTO dbo.Charges C
+USING      dbo.Accounts A
+ON         A.Cust_ID = C.Cust_ID
+
+WHEN MATCHED AND A.Balance >= 5000.00 THEN
+DELETE
+WHEN MATCHED AND A.Balance < 5000.00 THEN
+UPDATE SET C.Charge = (C.Charge + A.Balance*.01)
+
+WHEN NOT MATCHED BY TARGET AND A.Balance < 5000.00 THEN
+INSERT (Cust_ID, Charge)
+VALUES (Cust_ID, Balance*0.01)
+
+WHEN NOT MATCHED BY SOURCE AND C.Charge > 0.00 THEN
+UPDATE SET C.Charge = C.Charge*2.0
+WHEN NOT MATCHED BY SOURCE AND C.Charge = 0.00 THEN
+DELETE
+OUTPUT $action, deleted.*, inserted.*
+;
+
+--select AFTER
+select A.*, C.* from dbo.Accounts A
+left outer join dbo.Charges C
+on C.Cust_ID = A.Cust_ID
+union
+select  A2.*, C2.* from dbo.Charges C2
+left outer join dbo.Accounts A2
+on C2.Cust_ID = A2.Cust_ID
+order by A.Cust_ID Asc;
+
+/*
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Accounts]') AND type in (N'U'))
+DROP TABLE [dbo].[Accounts];
+GO
+create table dbo.Accounts
+(
+Cust_ID int not null,
+Balance decimal(9,2) not null constraint DF_Accounts_Balance default 0.00,
+constraint PK_Accounts primary key clustered (Cust_ID desc)
+);
+GO
+
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Charges]') AND type in (N'U'))
+DROP TABLE [dbo].[Charges];
+GO
+create table dbo.Charges
+(
+Cust_ID int not null,
+Charge decimal(9,2) not null constraint DF_Charges_Charge default 0.00,
+constraint PK_Charges primary key clustered (Cust_ID desc)
+);
+GO
+--if a/c is active and amount is >= 5000, waive charges. when matched and amount >= 5000. delete charges
+INSERT INTO [dbo].[Accounts]([Cust_ID], [Balance]) VALUES (1,6000.00);
+INSERT INTO [dbo].[Charges]([Cust_ID],[Charge]) VALUES (1,25.00);
+
+--if a/c is active and amount is < 5000, increase charges. when matched and amount < 5000. update charges 
+INSERT INTO [dbo].[Accounts]([Cust_ID], [Balance]) VALUES (2,4000.00);
+INSERT INTO [dbo].[Charges]([Cust_ID],[Charge]) VALUES (2,20.00);
+
+--if a/c is active with amount < 5000 and no charges have been assessed add charges. when not matched by target and amount < 5000. insert charges 
+INSERT INTO [dbo].[Accounts]([Cust_ID], [Balance]) VALUES (3,3000.00);
+ 
+--if a/c is closed but charges not paid off, double the existing charges. when not matched by source and charge > 0, increase charges 
+INSERT INTO [dbo].[Charges]([Cust_ID],[Charge]) VALUES (4,10.00);
+
+--if a/c is closed and all charges paid off, remove charge entry. when not matched by source and charge = 0, delete charges  
+INSERT INTO [dbo].[Charges]([Cust_ID],[Charge]) VALUES (5,0.00);
+
+--if a/c is in good standing and no charges assessed, a/c unaffected
+INSERT INTO [dbo].[Accounts]([Cust_ID], [Balance]) VALUES (6,7000.00);
+ 
+--delete from dbo.accounts
+--delete from dbo.charges
+
+--drop table dbo.accounts
+--drop table dbo.charges
+*/
+
+
+
+-----------------------------------------------------
+--- openXML
+declare @doc xml
+set @doc = '
+<vehicles>
+   <car vin="123" make="Ford" model="Mustang">
+      <repair>
+        <id>3</id>
+        <description>Replace Supercharger.</description>
+        <cost>4000.34</cost>
+      </repair>
+      <repair>
+        <id>45</id>
+        <description>Front end alignment.</description>
+        <cost>45.67</cost>
+      </repair>
+   </car>
+   <car vin="234" make="Mazda" model="Miata">
+      <repair>
+        <id>7</id>
+        <description>Repair top.</description>
+        <cost>123.45</cost>
+      </repair>
+      <repair>
+        <id>22</id>
+        <description>Oil Change.</description>
+        <cost>29.99</cost>
+      </repair>
+   </car>
+   <truck vin="567" make="Nissan" model="Pathfinder">
+      <repair>
+        <id>2</id>
+        <description>Replace air filter.</description>
+        <cost>34.95</cost>
+      </repair>
+      <repair>
+        <id>6</id>
+        <description>Oil Change.</description>
+        <cost>39.99</cost>
+      </repair>
+   </truck>
+</vehicles>
+'
+
+declare @hdoc int
+exec sp_xml_preparedocument @hdoc output, @doc
+-- (1) two tables of vehicle and repair
+select UPPER(VehicleType) as 'VehicleTypeUpper', *
+  from openxml (@hdoc, '/vehicles/*')
+  with (
+		 VehicleType varchar(10)	'@mp:localname'
+		,VIN varchar(10)			'@vin'
+		,Make varchar(20)			'@make'
+		,Model varchar(20)			'@model'
+	   )
+  
+select *
+  from openxml (@hdoc, '/vehicles/*/repair')
+  with (
+		 VIN varchar(10)			'../@vin'
+		,RepairId int				'id'
+		,Descr varchar(20)			'description'
+		,Cost money					'cost'
+	   )
+
+
+-- (2) one tables joined between the two tables of vehicle and repair
+select UPPER(VehicleType) as 'VehicleTypeUpper', *
+  from openxml (@hdoc, '/vehicles/*')
+  with (
+		 VehicleType varchar(10)	'@mp:localname'
+		,VIN varchar(10)			'@vin'
+		,Make varchar(20)			'@make'
+		,Model varchar(20)			'@model'
+	   ) as Veh
+inner join openxml (@hdoc, '/vehicles/*/repair')
+  with (
+		 VIN varchar(10)			'../@vin'
+		,RepairId int				'id'
+		,Descr varchar(20)			'description'
+		,Cost money					'cost'
+	   ) as Repr
+on Veh.VIN = Repr.VIN
+
+
+exec sp_xml_removedocument @hdoc
+
+
+
+-----------------------------------------------------
+--- ForXMLAuto
+-- base query
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+
+-- for xaml auto
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+  for xml auto
+  
+-- for xaml auto, with root and tag names: (most of the times it gives what you want)
+select Customer.CustomerID
+	  ,Customer.CompanyName
+	  ,[Order].OrderID
+	  ,[Order].OrderDate
+  from dbo.Customers Customer
+  join dbo.Orders [Order]
+  on Customer.CustomerID = [Order].CustomerID
+  order by Customer.CustomerID, [Order].OrderID
+  for xml auto, root('CustomersOrders')
+  
+  
+  
+
+
+-----------------------------------------------------
+--- ForXMLPath
+-- base query
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+
+-- for xml path
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+  for xml path
+
+-- for xml pathwith root and tag
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+  for xml path('Customer'), root('CustomersOrders')
+
+-- for xml pathwith root and tag and nested orders: (this is the best one)
+select c.CustomerID as [@Id]
+	  ,c.CompanyName as [@Name]
+	  ,(
+		select o.OrderID as [@Id]
+			  ,o.OrderDate as [@OrderDate]
+		  from dbo.Orders o
+		 where c.CustomerID = o.CustomerID
+		 order by c.CustomerID, o.OrderID
+		 for xml path('Order'), root('Orders'), type   -- merge into xml types instead of a string (and "&gt;&lt;" will go)
+	   )
+  from dbo.Customers c
+  for xml path('Customer'), root('CustomersOrders')
+
+
+
+
+
+-----------------------------------------------------
+--- ForXMLRaw
+-- base query
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+  
+-- for xml raw
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+  for xml raw 
+
+-- for xml raw, change row tag and provide root
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+  for xml raw ('CustomerOrder') , root ('CustomersOrders'), elements
+			  
+
+
+
+-----------------------------------------------------
+--- select examples
+ SELECT * --COUNT(*) -- sum(Freight)
+  FROM dbo.Orders
+  where year(orderdate) = 1997
+ 
+  SELECT * --COUNT(*) -- sum(Freight)
+  FROM dbo.Orders
+  where orderdate >= '1997-01-01 00:00:00.000'
+    and orderdate <= '1997-12-31 23:59:59.999'
+    
+SELECT productid, grouping(productid) as grpprdid, orderid, GROUPING(orderid) as grpordid
+	, sum(Quantity*UnitPrice*(1-Discount)) as total_amt
+  FROM [Northwind].[dbo].[Order Details]
+where orderid = 10250
+  group by productid, OrderID
+  with cube
+  order by grpprdid, ProductID, grpordid, OrderID
+  
+  SELECT sum(Freight)
+  FROM dbo.Orders
+  where year(orderdate) = 1997
+  
+select emp.EmployeeID as EmpId, emp.LastName as LN, emp.FirstName as FN, ter.TerritoryDescription as Territory
+  from dbo.Territories						ter 
+	   inner join dbo.EmployeeTerritories	etr
+	   on ter.TerritoryID = etr.TerritoryID
+	   inner join dbo.Employees				emp
+	   on etr.EmployeeID  = emp.EmployeeID
+ where 
+    ter.TerritoryDescription = 'Atlanta'
+    
+select emp.EmployeeID as EmpId, emp.LastName as LN, emp.FirstName as FN, ter.TerritoryDescription as Territory
+  from dbo.Territories						ter 
+	   inner join dbo.EmployeeTerritories	etr
+	   on ter.TerritoryID = etr.TerritoryID
+	   and ter.TerritoryDescription = 'Atlanta'
+	   inner join dbo.Employees				emp
+	   on etr.EmployeeID  = emp.EmployeeID
+
+  select cust.CustomerID, cust.CompanyName, count(ord.OrderID) as order_count
+  from dbo.Customers cust
+	   left outer join dbo.Orders ord
+		on ord.CustomerID = cust.CustomerID
+  group by cust.CustomerID, cust.CompanyName
+  order by order_count desc
+ 
+ SELECT empa.EmployeeID, empa.LastName + ', ' + empa.FirstName as EmpName, empb.LastName+ ', ' + empb.FirstName as BossName
+  FROM dbo.Employees empa
+  left outer join dbo.Employees empb
+  on empb.EmployeeID = empa.ReportsTo  
+
+SELECT SUBSTRING(cust.ContactName,charindex(' ',cust.ContactName)+1,99) 
+     + ', ' 
+     + SUBSTRING(cust.ContactName,1,charindex(' ',cust.ContactName)-1) as ContactName
+  FROM dbo.Customers cust
+union
+SELECT emp.LastName + ', ' +  emp.firstname as ContactName
+  FROM dbo.Employees emp
+order by  ContactName
+  
+
+-----------------------------------------------------
+--- SP
+-- using exec
+declare @sql1 varchar(max)
+set @sql1 = 'select * from '
+
+set @sql1 = @sql1 + 'dbo.employees'
+		-- sql 2008 : set @sql1 += 'dbo.employees'
+
+exec(@sql1)
+
+
+-- SP test
+truncate table dbo.TabNoKey  
+truncate table dbo.TabWithKey
+truncate table dbo.LogTable  
+go
+
+drop table dbo.TabNoKey  
+drop table dbo.TabWithKey
+drop table dbo.LogTable  
+go
+
+create table dbo.TabNoKey   (tid1 int, tid2 int)
+create table dbo.TabWithKey (tid1 int primary key, tid2 int)
+create table dbo.LogTable   (ErrNo int, ErrMsg varchar(max))
+go
+
+drop proc dbo.AddData 
+go
+create proc dbo.AddData 
+(
+	 @a int
+	,@b int
+)
+as
+	set nocount on
+	-- (1) if no error handler, then erroneous tran only, rest of teh SP exec will be committed
+	
+	-- (2) check @@error after EVERY sql statement to handle error
+	
+	-- (3) xact_abort: this is a quick fix - if no control of error is desired
+	---set xact_abort on			-- will rollback the entire execution if error occurs
+								
+	-- (4) if control of error is required, then use tri-catch. 
+	begin try
+		begin tran
+			insert into dbo.TabNoKey   values(@a, @b)
+			insert into dbo.TabWithKey values(@a, @b)
+			insert into dbo.TabNoKey   values(@a, @b)
+		commit tran	
+	end try  -- cannot put anything between "end try" and "begin catch"
+	begin catch 
+		rollback tran -- this rollback is required, otherwise the tran will hang on. 
+					  -- if error occurs - tran will rollback at a later time, anyway;
+					  -- or the tran will at least be rolled back after connection is closed
+		insert into dbo.Logtable values (ERROR_NUMBER(), ERROR_MESSAGE())
+		return
+	end catch
+go
+
+exec dbo.AddData 1, 1
+exec dbo.AddData 2, 2
+exec dbo.AddData 1, 3  -- violet pk
+go
+
+
+select * from dbo.TabNoKey  
+select * from dbo.TabWithKey
+select * from dbo.LogTable  
+
+
+
+-----------------------------------------------------
+--- Trigger
+-- insert TR
+drop trigger insEmployee 
+go
+create trigger insEmployee 
+on dbo.employees
+after insert
+as
+begin
+	set nocount on
+	declare @data xml
+	set @data = (
+					select * 
+					  from inserted as Employees
+					   for xml auto, binary base64, root('Inserted')
+				)
+
+	insert into dbo.auditTable (tableName, [action], dataChanges)
+		   values('Employees', 'I', @data)
+end
+go
+
+insert into dbo.Employees (LastName, FirstName)
+	   values ('Mouse', 'Mickey2'), ('Mouse', 'Mickey3'), ('Mouse', 'Mickey4'), ('Mouse', 'Mickey5')
+
+select * from dbo.auditTable
+
+-- delete TR
+create trigger delEmployee 
+on dbo.employees
+after delete
+as
+begin
+	set nocount on
+	declare @data xml
+	set @data = (
+					select * 
+					  from deleted as Employees
+					   for xml auto, binary base64, root('Deleted')
+				)
+
+	insert into dbo.auditTable (tableName, [action], dataChanges)
+		   values('Employees', 'D', @data)
+end
+go
+
+delete from dbo.Employees 
+	  where EmployeeID > 9
+	  
+select * from dbo.auditTable
+
+-- update TR
+create trigger updEmployee 
+on dbo.employees
+after update
+as
+begin
+	set nocount on
+	declare @data xml
+	set @data = (
+					select employee_before.* , employee_after.*
+					  from inserted as employee_after
+					  inner join deleted as employee_before
+					  on employee_after.EmployeeId = employee_before.EmployeeId
+					   for xml auto, binary base64, root('Updated')
+				)
+
+	insert into dbo.auditTable (tableName, [action], dataChanges)
+		   values('Employees', 'U', @data)
+end
+go
+
+update dbo.Employees
+   set LastName = UPPER(LastName)
+	  
+select * from dbo.auditTable
+
+
+
+-----------------------------------------------------
+--- XMLType
+-- add orders xml column
+alter table dbo.customers
+add orders xml null
+go
+
+select * from dbo.Customers
+
+-- populate orders
+update dbo.Customers
+   set orders = (
+					select	*
+					from	dbo.orders [Order]
+					where	[Order].CustomerID = Customers.CustomerID
+					order by OrderID
+					for xml auto, root('Orders')
+				)
+				
+select * from dbo.Customers
+
+-- query(1)
+select	CustomerId
+	   ,Orders.query('
+						<OrderIds>				
+						{
+							for $o in /Orders/Order
+							return <Id>
+									{ string($o/@OrderID) }
+								   </Id>
+						}
+						</OrderIds>
+					')		as OrderIds				
+					-- for-return loop
+					-- variables in xquery begins with xquery
+from	dbo.Customers
+
+-- query(2)
+declare @reportDate varchar(max)
+set @reportDate = CONVERT(varchar(max), getdate(),121)
+select	CustomerId
+	   ,Orders.query('
+						<OrderIds CompanyName ="{sql:column("CompanyName")}" ReportDate="{sql:variable("@reportDate")}">				
+						{
+							for $o in /Orders/Order
+							return <Id>
+									{ string($o/@OrderID) }
+								   </Id>
+						}
+						</OrderIds>
+					')		as OrderIds				
+					-- for-return loop
+					-- variables in xquery begins with xquery
+					-- {} - gets me into xquery mode (from hard-coded <...>)
+from	dbo.Customers
+
+
+-- value
+select	CustomerId
+	   ,TotalFreight = Orders.value('sum(/Orders/Order/@Freight)','money')
+	   ,AvgFreight = Orders.value('avg(/Orders/Order/@Freight)','money')
+	   ,TotalOrderCount = Orders.value('count(/Orders/Order)','int')
+	   ,FirstOrderId = Orders.value('(/Orders/Order/@OrderID)[(1)]','int')
+	   ,LastOrderId = Orders.value('(/Orders/Order/@OrderID)[last()]','int')
+from	dbo.Customers
+
+
+--exist
+-- whcih cust placed the order with OrderID="10768"
+select	*
+from	dbo.Customers
+where	Orders.exist('/Orders/Order[@OrderID="10768"]') = 1
+
+
+-- modify
+update	dbo.Customers
+set		Orders.modify('
+insert
+<Order OrderID="99999" CustomerID="BOTTM" EmployeeID="9" OrderDate="1998-04-24T00:00:00" RequiredDate="1998-05-22T00:00:00" ShippedDate="1998-04-30T00:00:00" ShipVia="3" Freight="99.99" ShipName="Bottom-Dollar Markets" ShipAddress="23 Tsawassen Blvd." ShipCity="Tsawassen" ShipRegion="BC" ShipPostalCode="T2F 8M4" ShipCountry="Canada" />
+as last
+into (/Orders)[1]
+					')
+where	Customers.CustomerID = 'BOTTM'
+
+update	dbo.Customers
+set		Orders.modify('
+replace value of 
+(Orders/Order[@OrderID=99999]/@Freight)[1] with "10.23"
+					')
+where	Customers.CustomerID = 'BOTTM'
+
+update	dbo.Customers
+set		Orders.modify('
+delete
+(Orders/Order[@OrderID=11048])
+					')
+where	Customers.CustomerID = 'BOTTM'
+
+select * from dbo.Customers
+
+-- base query
+select c.CustomerID
+	  ,c.CompanyName
+	  ,o.OrderID
+	  ,o.OrderDate
+  from dbo.Customers c
+  join dbo.Orders o
+  on c.CustomerID = o.CustomerID
+  order by c.CustomerID, o.OrderID
+
+
+-- nodes (instead of doing a join, I'm pulling the data from xml)
+select c.CustomerID
+	  ,c.CompanyName
+	  ,OrderColumn.value('@OrderID,','int') [OrderID]
+	  ,OrderColumn.value('@OrderDate,','datetime')  [OrderDate]
+  from dbo.Customers c
+  cross apply Orders.nodes('/Orders/Order') as orderNodes(orderColumn)
+  order by c.CustomerID, OrderID
+
+
+-- xml index
+-- note: for xml index, the pk must be clustering
+create primary xml index idx_orders
+on dbo.Customers(Orders)
+go
+
+create xml index idx_orders_path
+on dbo.Customers(Orders)
+using xml index idx_orders for path
+go
+
+create xml index idx_orders_property
+on dbo.Customers(Orders)
+using xml index idx_orders for property
+go
+
+create xml index idx_orders_value
+on dbo.Customers(Orders)
+using xml index idx_orders for value
+go
+
+

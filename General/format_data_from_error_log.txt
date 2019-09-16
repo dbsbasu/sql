@@ -1,0 +1,82 @@
+/*
+if object_id('tempdb..#errorlog') is not null drop table #errorlog;
+create table #errorlog (id int not null identity(1,1), [Date] datetime, [Source] varchar(800), [Message] varchar(4000));
+insert into #errorlog ([Date], [Source], [Message]) 
+EXEC master..xp_readerrorlog 0, 1, "I/O requests taking longer", null, null, null, N'desc';
+insert into #errorlog ([Date], [Source], [Message]) 
+
+Example:
+SQL Server has encountered 332 occurrence(s) of I/O requests taking longer than 15 seconds to complete on file...
+
+
+*/
+-------------------------------------
+;with error_log_data as
+(select er1.[Date] as DateTimestamp, 
+coalesce(substring(er1.[Message],
+(charindex(('in database ['),er1.[Message])+13), 
+((charindex(('] ('),(er1.[Message])))-(charindex(('in database ['),er1.[Message])+13))),'no file name captured') as DBNam,
+cast(coalesce(substring(er1.[Message],
+(charindex(('encountered '),er1.[Message])+12), 
+((charindex((' occurrence'),(er1.[Message])))-(charindex(('encountered '),er1.[Message])+12))),'IOCount not captured') as int) as IOIssues,
+coalesce(substring(er1.[Message],
+(charindex(('on file ['),er1.[Message])+9), 
+((charindex(('] in database'),(er1.[Message])))-(charindex(('on file ['),er1.[Message])+9))),'no file name captured') as FileNam,
+er1.[Message], er1.[Source]
+from #errorlog er1
+)
+--most current occurrence on top
+select DateTimestamp, FileNam, IOIssues, DBNam  from error_log_data order by DateTimestamp desc, FileNam asc
+
+;with error_log_data as
+(select er1.[Date] as DateTimestamp, 
+coalesce(substring(er1.[Message],
+(charindex(('in database ['),er1.[Message])+13), 
+((charindex(('] ('),(er1.[Message])))-(charindex(('in database ['),er1.[Message])+13))),'no file name captured') as DBNam,
+cast(coalesce(substring(er1.[Message],
+(charindex(('encountered '),er1.[Message])+12), 
+((charindex((' occurrence'),(er1.[Message])))-(charindex(('encountered '),er1.[Message])+12))),'IOCount not captured') as int) as IOIssues,
+coalesce(substring(er1.[Message],
+(charindex(('on file ['),er1.[Message])+9), 
+((charindex(('] in database'),(er1.[Message])))-(charindex(('on file ['),er1.[Message])+9))),'no file name captured') as FileNam,
+er1.[Message], er1.[Source]
+from #errorlog er1
+)
+--top IO Counts
+select DateTimestamp, IOIssues, DBNam, FileNam from error_log_data order by IOIssues desc, FileNam asc
+
+;with error_log_data as
+(select er1.[Date] as DateTimestamp, 
+coalesce(substring(er1.[Message],
+(charindex(('in database ['),er1.[Message])+13), 
+((charindex(('] ('),(er1.[Message])))-(charindex(('in database ['),er1.[Message])+13))),'no file name captured') as DBNam,
+cast(coalesce(substring(er1.[Message],
+(charindex(('encountered '),er1.[Message])+12), 
+((charindex((' occurrence'),(er1.[Message])))-(charindex(('encountered '),er1.[Message])+12))),'IOCount not captured') as int) as IOIssues,
+coalesce(substring(er1.[Message],
+(charindex(('on file ['),er1.[Message])+9), 
+((charindex(('] in database'),(er1.[Message])))-(charindex(('on file ['),er1.[Message])+9))),'no file name captured') as FileNam,
+er1.[Message], er1.[Source]
+from #errorlog er1
+)
+--top IO Counts per database
+select DateTimestamp, DBNam, IOIssues, FileNam from error_log_data order by DBNam asc, IOIssues desc
+
+;with error_log_data as
+(select er1.[Date] as DateTimestamp, 
+coalesce(substring(er1.[Message],
+(charindex(('in database ['),er1.[Message])+13), 
+((charindex(('] ('),(er1.[Message])))-(charindex(('in database ['),er1.[Message])+13))),'no file name captured') as DBNam,
+cast(coalesce(substring(er1.[Message],
+(charindex(('encountered '),er1.[Message])+12), 
+((charindex((' occurrence'),(er1.[Message])))-(charindex(('encountered '),er1.[Message])+12))),'IOCount not captured') as int) as IOIssues,
+coalesce(substring(er1.[Message],
+(charindex(('on file ['),er1.[Message])+9), 
+((charindex(('] in database'),(er1.[Message])))-(charindex(('on file ['),er1.[Message])+9))),'no file name captured') as FileNam,
+er1.[Message], er1.[Source]
+from #errorlog er1
+)
+--ordered by File Name if interested in specific File Name
+select DateTimestamp, FileNam, IOIssues, DBNam  from error_log_data order by FileNam asc, IOIssues desc
+
+

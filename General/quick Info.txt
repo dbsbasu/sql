@@ -1,0 +1,244 @@
+﻿
+--run_sp_whoIsActive
+exec utils.dbo.sp_whoisactive @get_plans = 1
+
+exec utils.dbo.sp_whoisactive @find_block_leaders = 1
+
+
+exec Utils.dbo.sp_whoisactive
+@get_full_inner_text = 1,
+@get_plans = 1,
+@get_outer_command = 1,
+@get_transaction_info = 1,
+@get_locks = 1,
+@get_additional_info = 1,
+@find_block_leaders = 1
+
+
+
+--DECLARE	@return_value int,@schema varchar(max)
+--EXEC	@return_value = [Utils].[dbo].[sp_WhoIsActive]
+----		@filter = p_xdb1, @filter_type = --N'Database',@schema = @schema OUTPUT
+
+
+-- deployment verification
+select sc.name as schemaName, ob.name as objectName, ob.type_desc, ob.modify_date, ob.create_date 
+from sys.objects ob with (nolock) inner join sys.schemas sc on sc.[schema_id] = ob.[schema_id]
+where ob.modify_date >= dateadd(hour,-1,getdate()) 
+order by ob.type_desc asc, ob.modify_date desc
+
+select  sc.name as schemaName, ob.name as tableName, ob.modify_date, ob.create_date, ix.name as IXName,
+STATS_DATE(ix.object_id,ix.index_id) as Last_Updt_Stats
+from sys.objects ob 
+inner join sys.schemas sc on sc.schema_id = ob.schema_id and ob.type = 'U'
+inner join sys.indexes ix on ix.object_id = ob.object_id 
+where STATS_DATE(ix.object_id,ix.index_id) >= dateadd(MINUTE,-60,getdate())
+order by sc.name, ob.name, ix.index_id
+
+
+
+
+
+Genius is 1 per cent inspiration, and 99 per cent perspiration - Thomas Alva Edison 
+More often than not, success is the result of hard work -- not great ideas
+
+
+______________________________________________________
+
+DECLARE	@return_value int,@schema varchar(max)
+EXEC	@return_value = [DBAUtils].[dbo].[sp_WhoIsActive]
+--		@filter = p_xdb1, @filter_type = N'Database',@schema = @schema OUTPUT
+
+_______________________________________________________
+
+SELECT * FROM ::fn_trace_getinfo(NULL) --> displays all traces running in
+--exec sp_trace_setstatus 3, 0 --> stops the trace                (3 = trace id)
+--exec sp_trace_setstatus 3, 2 --> deletes the trace definition   (3 = trace id)
+/*
+1= Trace options 
+2 = File name 
+3 = Max size 
+4 = Stop time 
+5 = Current trace status. 0 = stopped. 1 = running. 2 = unlocked.
+*/
+--Browse trace file:
+
+
+select  DatabaseName, SPID, ObjectName, ObjectType, StartTime, EndTime, duration, 
+tro.EventClass, ste.name as EventName, 
+LoginName, HostName, TextData, EventSequence
+from fn_trace_gettable('\\abc\D$\trace_0815_A.trc',1) tro
+left outer join sys.trace_events ste ON ste.trace_event_id = tro.EventClass
+--where ste.name in ('RPC:Starting','RPC:Completed')
+where ObjectName = 'usp_sp1'
+order by SPID asc, tro.EventSequence asc
+
+--counts
+select tro.DatabaseName, tro.ObjectName, COUNT(tro.ObjectName) 
+from fn_trace_gettable('\\abc\D$\trace_0815_A.trc',1) tro
+--where ste.name in ('RPC:Starting','RPC:Completed')
+where tro.ObjectName is not NULL
+group by tro.DatabaseName, tro.ObjectName
+order by tro.DatabaseName asc, tro.ObjectName asc
+
+
+--duration of trace
+select  min(StartTime) as Begins, max(StartTime) as Ends
+from fn_trace_gettable('\\abc\D$\trace_0815_B.trc',1) tro
+
+
+
+
+--wip
+select SPID, DatabaseName, ObjectName, ObjectType, EndTime, duration, ste.name as EventName, LoginName, HostName, TextData, EventSequence, * --, spt.name as ObjectType
+from fn_trace_gettable('E:\abctrace.trc',1) tro
+inner join sys.trace_events ste ON ste.trace_event_id = tro.EventClass
+--left outer join dbo.spt_values spt on spt.number = tro.ObjectType and tro.ObjectType is not null
+--where ste.name in ('RPC:Starting','RPC:Completed')
+order by tro.EventSequence asc
+
+
+
+______________________________________________________
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+$serverX = new-object "Microsoft.SqlServer.Management.Smo.Server" abc
+foreach ($db in $serverX.Databases)  {if ($db -match "source") { foreach($fg in $db.filegroups){ foreach ($file in $fg.files) { $db.name, $fg.name, $file.name, $fg.size  }}}}
+foreach ($db in $serverX.Databases)  {if (!$db.isSystemObject) { foreach($log in $db.logfiles){ $db.name, $log.name, $log.size  }}}
+
+
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+$serverX = new-object "Microsoft.SqlServer.Management.Smo.Server" abc
+foreach ($db in $serverX.Databases) { $db.logfiles| select parent, name, filename, size}
+
+$serverX.settings.defaultlog.substring(0,1)
+
+
+
+foreach ($db in $serverX.Databases) { $db.name; foreach ($fg in $db.filegroups) {$fg.files|select  name, filename, size, usedspace}}
+$serverX.settings.defaultfile
+
+
+PS U:\> foreach ($jobs in $serverX.jobserver) {foreach($job in $jobs.jobs) {$job
+.name; foreach($jobSchedule in $job.JobSchedules) {$jobSchedule|select-object id
+, FrequencyTypes, FrequencySubDayTypes, FrequencyInterval, ActiveStartTimeOfDay,
+ ActiveEndTimeOfDay, Name }  } }
+
+
+
+[System.Reflection.Assembly]::LoadWithPartialName('Microsoft.SqlServer.SMO')  | out-null
+
+	$s = new-object ('Microsoft.SqlServer.Management.Smo.Server') 'SQLi1\INST01'
+	$fileloc = $s.Settings.DefaultFile
+	$logloc = $s.Settings.DefaultLog
+	if ($fileloc.Length = 0) {
+	    $fileloc = $s.Information.MasterDBPath
+	    }
+	if ($logloc.Length = 0) {
+	    $logloc = $s.Information.MasterDBLogPath
+	    }
+
+
+
+$serverX.ComputerNamePhysicalNetBIOS
+
+
+
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")
+$serverX = new-object "Microsoft.SqlServer.Management.Smo.Server" abc
+
+foreach ($db in $serverX.Databases) {$db |where-object {$db.name -eq "abc"}}
+
+foreach ($db in $serverX.Databases) {$db.properties |where-object {$db.name -eq "RKM" -and $db.properties -match "ReplicationOptions"}}
+
+foreach ($db in $serverX.Databases) {$db.properties |select name, value |sort-object name |where-object {$db.name -eq "faonws"}}
+
+foreach ($db in $serverX.Databases) {$db.properties |select name, value |where {$_.name -eq "MirroringRole"}  |where-object {$db.name -eq "rkm"}}
+foreach ($db in $serverX.Databases) { $db.properties |where {$_.name -eq "MirroringRole"}  | select name, value}
+
+foreach ($db in $serverX.Databases) { $a1= $db.properties |where {$_.name -eq "MirroringRole"}  | select value; $a1}
+
+
+-- the above one gives @value=.    to avoid that consider it object and do the following
+foreach ($db in $serverX.Databases) {$a1 = ($db.properties |where {$_.name -eq "MirroringRole"}  | select-object value); $a1.value}
+
+
+foreach ($db in $serverX.Databases) {$db | select name, status, IsAccessible, isdatabasesnapshot,MirroringStatus,mirroringpartner,ReplicationOptions}
+
+
+
+
+
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_PADDING ON
+GO
+
+SET XACT_ABORT ON
+BEGIN TRANSACTION
+
+COMMIT TRANSACTION
+GO
+
+
+
+
+add the following setting for any create/alter script
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+SET ANSI_PADDING ON
+GO
+
+SET XACT_ABORT ON
+BEGIN TRANSACTION
+
+...
+
+COMMIT TRANSACTION
+GO
+
+
+
+
+UPDATE STATISTICS dbo.<table_name>
+
+
+------------------------
+
+
+
+
+
+
+
+--ps version
+Get-PSSnapin registered
+
+$PSVersionTable
+
+Cmd.exe
+	Register-PSSessionConfiguration -Name PS2 -PSVersion 2.0
+
+
+run as administrator
+set-executionpolicy
+unrestricted
+cd powershell 
+.\GetMountpointWIP_gridview.ps1
+
+
+
+http://www.propertycasualty360.com/2012/12/18/5-ways-to-spot-a-workplace-bully
+https://louisville.edu/ombuds/selfhelp/reading/Workplace%20Bullying.pdf/at_download/file
+
+

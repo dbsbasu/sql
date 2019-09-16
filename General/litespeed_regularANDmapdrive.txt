@@ -1,0 +1,10 @@
+--> litespeed to regular backup
+D:\>Extractor.exe -F \\location1
+file.bak -E \\location2
+loc3
+
+
+--> mapping drive
+D:\>net use * \\server\C$ /user:domain\me
+
+

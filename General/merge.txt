@@ -1,0 +1,68 @@
+declare @Accounts table
+(Cust_ID int not null,
+Balance decimal(9,2) not null default 0.00);
+ 
+DECLARE @Charges table
+(Cust_ID int not null,
+Charge decimal(9,2) not null default 0.00);
+
+--if a/c is active and amount is >= 5000, waive charges. when matched and amount >= 5000. delete charges
+INSERT INTO @Accounts([Cust_ID], [Balance]) VALUES (1,6000.00);
+INSERT INTO @Charges([Cust_ID],[Charge]) VALUES (1,25.00);
+ 
+--if a/c is active and amount is < 5000, increase charges. when matched and amount < 5000. update charges
+INSERT INTO @Accounts([Cust_ID], [Balance]) VALUES (2,4000.00);
+INSERT INTO @Charges([Cust_ID],[Charge]) VALUES (2,20.00);
+ 
+--if a/c is active with amount < 5000 and no charges have been assessed add charges. when not matched by target and amount < 5000. insert charges
+INSERT INTO @Accounts([Cust_ID], [Balance]) VALUES (3,3000.00);
+--if a/c is closed but charges not paid off, double the existing charges. when not matched by source and charge > 0, increase charges
+INSERT INTO @Charges([Cust_ID],[Charge]) VALUES (4,10.00);
+ 
+--if a/c is closed and all charges paid off, remove charge entry. when not matched by source and charge = 0, delete charges 
+INSERT INTO @Charges([Cust_ID],[Charge]) VALUES (5,0.00);
+ 
+--if a/c is in good standing and no charges assessed, a/c unaffected
+INSERT INTO @Accounts([Cust_ID], [Balance]) VALUES (6,7000.00);
+
+--select BEFORE
+select A.*, C.* from @Accounts A
+left outer join @Charges C
+on C.Cust_ID = A.Cust_ID
+union
+select  A2.*, C2.* from @Charges C2
+left outer join @Accounts A2
+on C2.Cust_ID = A2.Cust_ID
+order by A.Cust_ID Asc;
+ 
+--MERGE
+MERGE INTO @Charges C
+USING      @Accounts A
+ON         A.Cust_ID = C.Cust_ID
+
+WHEN MATCHED AND A.Balance >= 5000.00 THEN
+DELETE
+WHEN MATCHED AND A.Balance < 5000.00 THEN
+UPDATE SET C.Charge = (C.Charge + A.Balance*.01)
+ 
+WHEN NOT MATCHED BY TARGET AND A.Balance < 5000.00 THEN
+INSERT (Cust_ID, Charge)
+VALUES (Cust_ID, Balance*0.01)
+ 
+WHEN NOT MATCHED BY SOURCE AND C.Charge > 0.00 THEN
+UPDATE SET C.Charge = C.Charge*2.0
+WHEN NOT MATCHED BY SOURCE AND C.Charge = 0.00 THEN
+DELETE
+OUTPUT $action, deleted.*, inserted.*
+;
+ 
+--select AFTER
+select A.*, C.* from @Accounts A
+left outer join @Charges C
+on C.Cust_ID = A.Cust_ID
+union
+select  A2.*, C2.* from @Charges C2
+left outer join @Accounts A2
+on C2.Cust_ID = A2.Cust_ID
+order by A.Cust_ID Asc;
+ 

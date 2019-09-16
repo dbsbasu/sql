@@ -1,0 +1,38 @@
+-- cannot define FK with unique index (need unique key or primary key)
+DROP TABLE IF EXISTS dbo.ut2;
+DROP TABLE IF EXISTS dbo.ut1;
+
+CREATE TABLE dbo.ut1 (ut1_id TINYINT IDENTITY(1,1) NOT null);
+CREATE UNIQUE CLUSTERED INDEX uq_cl_ut1 ON dbo.ut1 (ut1_id ASC);
+
+CREATE TABLE dbo.ut2 (ut2_id TINYINT IDENTITY(1,1) NOT NULL, ut1_id TINYINT NOT NULL);
+CREATE UNIQUE CLUSTERED INDEX uq_cl_ut2 ON dbo.ut2 (ut2_id ASC);
+ALTER TABLE dbo.ut2 ADD CONSTRAINT fk_ut2_ut1 FOREIGN KEY (ut1_id) REFERENCES dbo.ut1;
+
+/*
+-- has to have uk or pk to add fk - works 
+DROP TABLE IF EXISTS dbo.ut2;
+DROP TABLE IF EXISTS dbo.ut1;
+
+CREATE TABLE dbo.ut1 (ut1_id TINYINT IDENTITY(1,1) NOT null,
+CONSTRAINT pk_ut1 PRIMARY KEY CLUSTERED (ut1_id ASC));
+
+CREATE TABLE dbo.ut2 (ut2_id TINYINT IDENTITY(1,1) NOT NULL, ut1_id tinyint);
+CREATE UNIQUE CLUSTERED INDEX uq_cl_ut2 ON dbo.ut2 (ut2_id ASC);
+ALTER TABLE dbo.ut2 ADD CONSTRAINT fk_ut2_ut1 FOREIGN KEY (ut1_id) REFERENCES dbo.ut1;
+*/
+
+
+-- unique key is okay for FK
+drop table dbo.tChild;
+create table dbo.tChild (comment varchar(20),name varchar(20));
+
+drop table dbo.tParent;
+create table dbo.tParent (name varchar(20) /*PK requires it to be non-null*/ /*not null*/);
+create unique nonclustered index UX_tParent on dbo.tParent (name asc); --> unique index is sufficient to be referenced for FK
+--alter table dbo.tParent with check add constraint UC_tParent unique (name asc);
+--alter table dbo.tParent with check add constraint PK_tParent primary key (name asc);
+
+alter table dbo.tChild with check
+add constraint fk_tChild_tParent foreign key (name) 
+references dbo.tParent (name);

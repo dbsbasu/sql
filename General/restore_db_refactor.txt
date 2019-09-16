@@ -1,0 +1,46 @@
+use [master]
+
+go
+
+--restore database from full backup
+RESTORE DATABASE [db1]
+ 
+FROM DISK = N'\\server\C$\Support\db1_First_Restore\db1_Backup_20151109142707_01.BAK'
+ WITH  FILE = 1, 
+ MOVE N'db1_System' TO N'sql\DATA\db1\db1_DATAFILE1\db1_System.mdf',
+ MOVE N'db1_Data_01' TO N'sql\DATA\db1\db1_DATAFILE1\db1_Data_01.ndf',
+ MOVE N'db1_History' TO N'sql\DATA\db1\db1_DATAFILE1\db1_History.ndf',
+ MOVE N'db1_Index' TO N'sql\DATA\db1\db1_DATAFILE1\db1_Index.ndf',
+ MOVE N'db1_Text' TO N'sql\DATA\db1\db1_DATAFILE1\db1_Text.ndf',
+ MOVE N'db1_log' TO N'sql\LOG\db1\db1_LOGFILE1\db1_log.ldf',
+ NOUNLOAD,  replace, STATS = 10
+
+ 
+
+--set standard options
+alter authorization on database::db1 to sa
+alter database db1 set trustworthy on
+
+--set norecovery mode
+RESTORE DATABASE [db1]
+ 
+FROM DISK = N'\\server\C$\Support\db1_First_Restore\db1_Backup_20151109142707_01.BAK'
+ WITH  FILE = 1, 
+ MOVE N'db1_System' TO N'sql\DATA\db1\db1_DATAFILE1\db1_System.mdf',
+ MOVE N'db1_Data_01' TO N'sql\DATA\db1\db1_DATAFILE1\db1_Data_01.ndf',
+ MOVE N'db1_History' TO N'sql\DATA\db1\db1_DATAFILE1\db1_History.ndf',
+ MOVE N'db1_Index' TO N'sql\DATA\db1\db1_DATAFILE1\db1_Index.ndf',
+ MOVE N'db1_Text' TO N'sql\DATA\db1\db1_DATAFILE1\db1_Text.ndf',
+ MOVE N'db1_log' TO N'sql\LOG\db1\db1_LOGFILE1\db1_log.ldf',
+ NOUNLOAD,  norecovery,  replace, STATS = 10
+
+
+--start the tlogship 
+RESTORE LOG [db1] 
+FROM  DISK = N'sql\BACKUPS\Standby\db1\TLog\db1_tlog_20151109143232.TRN' 
+WITH  FILE = 1,  
+STANDBY = N'sql\BACKUPS\Standby\db1\UNDO_db1.ldf',  
+NOUNLOAD,  STATS = 10
+
+
+

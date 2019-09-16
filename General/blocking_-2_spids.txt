@@ -1,0 +1,14 @@
+	
+
+
+-2 spids cannot be killed directly, one must kill the UOW (Unit of Work) 
+To determine the associated UOW, run the following query - 
+select distinct req_transactionUOW from syslockinfo where req_spid = '-2'
+
+A UOW of all zeros will often be displayed - that one cannot be killed and is not the cause of the issue.  Other UOWs will need to be killed though.  This can be done by executing KILL 'UOW' using the following example –
+kill 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaaa'
+
+Repeat process until -2 blocking goes away
+
+
+

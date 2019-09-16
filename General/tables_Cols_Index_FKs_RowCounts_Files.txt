@@ -1,0 +1,400 @@
+--search all databases where this columns exists STARTS
+if exists (select 1 from tempdb.sys.objects where name ='##t1' and type in (N'U')) drop table ##t1;
+CREATE TABLE ##t1 (DatabaseName sysname, ObjectName sysname, ColumnId int, ColumnName sysname, ColumnDataType sysname, ColumnLength int, ColumnIsNullable bit)
+
+EXEC sp_msForEachDB '
+if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'') return
+use [?] 
+
+INSERT INTO ##t1 (DatabaseName, ObjectName, ColumnId, ColumnName, ColumnDataType, ColumnLength,ColumnIsNullable)
+SELECT ''?'' as DatabaseName, sc.name + ''.'' + ob.name AS ObjectName, cl.column_id AS ColumnId, cl.name AS ColumnName, st.name AS ColumnDataType, cl.max_length AS ColumnLength, cl.is_nullable AS ColumnIsNullable
+FROM		[?].sys.objects ob
+INNER JOIN	[?].sys.schemas sc ON sc.schema_id = ob.schema_id
+INNER JOIN	[?].sys.columns cl ON cl.object_id = ob.object_id
+INNER JOIN	[?].sys.types   st ON st.user_type_id = cl.user_type_id
+WHERE ob.type in (''U'',''V'')
+AND   cl.name = ''LoanNumber'' ;
+'
+select * from ##t1;
+if exists (select 1 from tempdb.sys.objects where name ='##t1' and type in (N'U')) drop table ##t1;
+
+--search all databases where this columns exists ENDS
+
+---- used presently, the best so far ---- STARTs-----
+-- columns (best, used often)
+select sc.name as 'Schema', ob.name as 'Table', cl.colorder, cl.name as 'Column', ty.name as 'DataType', coalesce(icl.CHARACTER_MAXIMUM_LENGTH,cl.length) as CharMaxLength, c2.is_identity, cl.scale, cl.prec, cl.isnullable, isnull(dc.name,'') as 'DF_Constr', isnull(dc.definition,'') as Constr_Definition
+from dbo.syscolumns cl
+inner join dbo.sysobjects ob on ob.id = cl.id and ob.xtype = 'U' 
+inner join sys.columns c2 on c2.object_id = cl.id and c2.column_id = cl.colid and c2.name = cl.name
+inner join sys.schemas sc on sc.schema_id = ob.uid
+inner join INFORMATION_SCHEMA.COLUMNS icl on icl.TABLE_CATALOG = DB_NAME() and icl.TABLE_SCHEMA = sc.name and icl.TABLE_NAME = ob.name and icl.COLUMN_NAME = cl.name
+inner join dbo.systypes ty on ty.xusertype = cl.xusertype
+left outer join sys.default_constraints dc on dc.parent_column_id = cl.colid and dc.parent_object_id = cl.id and dc.object_id = cl.cdefault
+where 
+--sc.name = 'staging'
+--c2.is_identity = 1
+order by sc.name, ob.name, cl.colorder
+
+
+
+--indexes (best, used most often, better scope)
+select sc.name as 'Schema', ob.name as 'Table', ix.index_id as 'IndexId', ix.name as IndexName, coalesce(ix.type_desc,'-') as IndexType,(case when(ix.is_primary_key = 1) then 'Primary' when(ix.is_unique_constraint = 1) then 'UniqConstr' else '-' end) as ifKey, (case when(ix.is_unique = 1) then 'Uniq' else '-' end) as Uniq, xc.key_ordinal as IX_Key_Seq, cl.name as 'Column', (case when(xc.is_descending_key = 0) then 'Asc' else 'Dsc' end) ,ty.name as 'DataType', coalesce(icl.CHARACTER_MAXIMUM_LENGTH,cl.length) as CharMaxLength, cl.scale, cl.prec, cl.isnullable, cl.colorder, STATS_DATE(ix.object_id,ix.index_id) as Last_Updt_Stats
+from dbo.sysobjects ob 
+inner join sys.schemas sc on sc.schema_id = ob.uid and ob.xtype = 'U' 
+left outer join sys.indexes ix on ix.object_id = ob.id 
+left outer join sys.index_columns xc on xc.object_id = ob.id and xc.index_id = ix.index_id
+left outer join dbo.syscolumns cl on ob.id = cl.id and cl.id = xc.object_id and cl.colid = xc.column_id
+left outer join INFORMATION_SCHEMA.COLUMNS icl on icl.TABLE_CATALOG = DB_NAME() and icl.TABLE_SCHEMA = sc.name and icl.TABLE_NAME = ob.name and icl.COLUMN_NAME = cl.name
+left outer join dbo.systypes ty on ty.xusertype = cl.xusertype
+--where sc.name = 'Staging'
+order by sc.name, ob.name, ix.index_id, xc.key_ordinal
+
+
+--partitions, objects, inexes
+select pt.partition_id, ob.type_desc, sc.name, ob.object_id, ob.name, ix.index_id as 'IndexId', ix.name as IndexName, coalesce(ix.type_desc,'-') as IndexType
+from sys.partitions pt
+INNER JOIN sys.objects ob ON ob.object_id = pt.object_id
+inner join sys.indexes ix on ix.object_id = ob.object_id AND ix.index_id = pt.index_id
+inner join sys.schemas sc on sc.schema_id = ob.schema_id
+WHERE pt.partition_id in (72112234345456678,72123456789999991)
+
+
+
+-- Referential Constraints (FK, greatest so far for FK)
+SELECT 
+--child
+sc1.name as Referencing_schema, object_name(fk.parent_object_id) as Referencing_table, COL_NAME(fc.parent_object_id,fc.parent_column_id) AS Referencing_column, case cl.isnullable when 1 then 'Null - alarming' else '-'  end as column_is_nullable,
+--FK
+fk.name AS Foreign_Key, fc.constraint_column_id as FK_Col_Seq, 
+--parent
+sc.name as Referenced_schema, OBJECT_NAME (fk.referenced_object_id) AS Referenced_table, COL_NAME(fc.referenced_object_id,fc.referenced_column_id) AS Referenced_column, --cl2.isnullable, :PK can't be null... just for documentation 
+--rule
+fk.delete_referential_action_desc as DEL_rule, fk.update_referential_action_desc as UPD_rule,
+case fk.is_disabled when 1 then 'Disabled' else '-' end as fk_is_disabled, fk.is_not_trusted, fk.modify_date, fk.create_date
+FROM sys.foreign_keys AS fk
+inner join sys.foreign_key_columns AS fc ON fc.constraint_object_id = fk.OBJECT_ID
+--parent
+inner join sys.tables tb on tb.object_id = fk.referenced_object_id
+inner join sys.schemas as sc on sc.schema_id = tb.schema_id
+--inner join dbo.syscolumns cl2 on cl2.id = tb.object_id and cl2.colid = fc.referenced_column_id :PK can't be null... just for documentation 
+--child
+inner join sys.tables tb1 on tb1.object_id = fk.parent_object_id
+inner join dbo.syscolumns cl on cl.id = tb1.object_id and cl.colid = fc.parent_column_id
+inner join sys.schemas as sc1 on sc1.schema_id = tb1.schema_id and sc1.name = 'staging'
+order by Referencing_schema asc, Referencing_table asc, Foreign_Key asc, FK_Col_Seq asc
+
+
+--row counts
+select sc.name as schema_nam, ob.name as ob_nam, ob.type_desc ob_type_desc, ix.type_desc as ix_type_desc, pt.partition_number, pt.rows
+from sys.objects ob 
+INNER JOIN sys.schemas as sc
+    ON sc.schema_id = ob.schema_id
+INNER JOIN sys.partitions pt
+	ON pt.object_id = ob.object_id
+INNER JOIN sys.indexes ix
+	ON ix.index_id = pt.index_id
+	AND ix.object_id = pt.object_id	
+   where 
+		 (ix.index_id <= 1) and
+		 sc.name <> 'sys'
+order by sc.name, ob.name, pt.partition_number
+
+--table / index size and row counts
+select object_schema_name(ps.object_id) as schemaName, object_name(ps.object_id) as objectName, sum(in_row_reserved_page_count) as in_row_Pages, sum(lob_reserved_page_count) as lob_Pages, sum(row_overflow_reserved_page_count) as overflow_Pages, sum(reserved_page_count) as total_Pages, sum(row_count) as CountOfRows, coalesce(ix.name, 'heap') as indexName 
+from sys.dm_db_partition_stats ps
+left outer join sys.indexes ix on ix.object_id = ps.object_id  and ix.index_id = ps.index_id
+where object_schema_name(ps.object_id) <> 'sys'
+group by object_schema_name(ps.object_id), object_name(ps.object_id), ps.index_id, ix.name
+order by object_schema_name(ps.object_id), object_name(ps.object_id), ps.index_id, ix.name
+
+
+-- database files (best, used often)
+exec sp_msForEachDB '
+if ''[?]'' not in (''[XYZCLU]'',''[XYZITU_Author]'',''[XYZITU_Deploy]'',''[XYZITU_Test]'') return
+use [?] 
+
+SELECT DB_NAME() as DBNam, coalesce(fg.name ,''TranLog'') AS File_Group, df.type_desc, df.name as Logical_name, df.physical_name AS Physical_name
+FROM sys.database_files df
+left outer join sys.filegroups fg
+ON df.data_space_id = fg.data_space_id
+'
+-- tables and indexes and FG (best, used often)
+select ob.[object_id], sc.name as SchemaNam, ob.[name] as 'TableNam', coalesce (ix.[name], 'heap') as 'IX_name', ix.[index_id],
+fg.name as 'File_Group'
+from sys.indexes ix 
+inner join sys.filegroups fg on ix.data_space_id = fg.data_space_id
+inner join sys.all_objects ob on ix.[object_id] = ob.[object_id] AND ob.[type] = 'U'
+inner join sys.schemas sc on sc.schema_id = ob.schema_id
+order by sc.name asc, ob.name, IX_name
+
+
+-- Objects where this column belongs to
+-- Objects where this column belongs to
+SELECT  object_SCHEMA_NAME(OBJECT_ID(ob.name)) +'.'+ ob.name as 'ObjectName', cl.colorder 'ColumnOrder', cl.name 'ColumnName', st.name 'Type', cl.length, cl.isnullable
+--		,st.length as 'Length'
+  FROM  dbo.sysobjects ob
+       ,dbo.syscolumns cl
+       ,dbo.systypes   st
+ WHERE  cl.name like 'ProductCategoryCode'
+   AND  ob.id = cl.id
+   AND  st.xtype = cl.xtype
+
+
+-- Databasess where this Object belongs to
+exec sp_msForEachDB '
+if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'') return
+use [?] 
+
+SELECT db_name() as dbName, object_schema_name(object_id) as schemaName, name as objectName 
+from sys.objects 
+where 
+type = ''p''
+and name in ()
+'
+
+
+
+-- get Check Constraint Info 
+select ob.name as 'ObjectName', ck.[name] AS 'Check_Name', cl.[name] AS 'Check_Column', ck.[definition] AS 'Check_Definition'
+from sys.check_constraints ck with (nolock)
+	inner join sys.objects ob with (nolock)
+	on ob.object_id = ck.parent_object_id
+	inner join sys.columns cl with (nolock)
+	on ob.object_id = cl.object_id
+	and cl.column_id = ck.parent_column_id
+	WHERE 
+		ob.type in (N'U')
+	and ck.type LIKE 'C';
+
+---- used in the past, there is another one to use now ---- STARTS
+----PARTITIONs related
+-- get Check Constraint Info 
+select ob.name as 'ObjectName', ck.[name] AS 'Check_Name', cl.[name] AS 'Check_Column', ck.[definition] AS 'Check_Definition'
+from sys.check_constraints ck with (nolock)
+	inner join sys.objects ob with (nolock)
+	on ob.object_id = ck.parent_object_id
+	inner join sys.columns cl with (nolock)
+	on ob.object_id = cl.object_id
+	and cl.column_id = ck.parent_column_id
+	WHERE 
+		ob.type in (N'U')
+	and ck.type LIKE 'C'
+	and ob.name in 
+(
+   -- PS and tables
+SELECT  distinct object_name(tb.object_id)
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.indexes AS ix with (nolock) 
+ON ix.data_space_id = ps.data_space_id
+inner join sys.tables AS tb with (nolock)
+ON tb.object_id = ix.object_id
+);
+
+-- get Existing PFs
+SELECT  distinct pf.name AS 'Partition_Function', pf.type_desc 'Partition_Type', parm.parameter_id 'Parm_Id', ty.name 'Data_Type', pf.boundary_value_on_right, pf.fanout 'Total_Partitions', ps.name AS 'Partition_Scheme'
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.partition_functions pf with (nolock)
+ON pf.function_id = ps.function_id
+inner join sys.partition_parameters parm
+on parm.function_id = pf.function_id
+inner join dbo.systypes ty 
+on ty.xusertype = parm.system_type_id
+ORDER BY Partition_Function, Partition_Scheme;
+
+-- get PF and Part info 
+SELECT  distinct pf.name AS 'Partition_Function', ps.name AS 'Partition_Scheme', 
+		dds.destination_id AS 'Partition_Number', 
+		prv.value AS 'Range_Value'		
+FROM sys.partition_schemes AS ps  with (nolock)
+	INNER JOIN sys.destination_data_spaces AS dds  with (nolock)
+		ON ps.data_space_id = dds.partition_scheme_id
+	INNER JOIN sys.partition_functions pf with (nolock)
+		ON pf.function_id = ps.function_id
+	left outer JOIN sys.partition_range_values prv with (nolock)
+		ON prv.function_id = ps.function_id
+		AND prv.boundary_id = dds.destination_id
+--where
+--		pf.name = 'myPartitionFunction'
+--and		ps.name = 'myPartitionScheme'
+ORDER BY Partition_Function, Partition_Scheme, Partition_Number desc;
+
+-- PS and tables
+SELECT  distinct ps.name AS 'Partition_Scheme', schema_name(schema_id) as 'SchemaName', object_name(tb.object_id) as 'Table_Name'
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.indexes AS ix with (nolock) 
+ON ix.data_space_id = ps.data_space_id
+inner join sys.tables AS tb with (nolock)
+ON tb.object_id = ix.object_id
+ORDER BY Partition_Scheme, SchemaName, Table_Name;
+
+-- get PS info for Indexes on tables
+--indexes (best, used most often, better scope)
+select distinct sc.name as 'Schema', ob.name as 'Table', ix.index_id as 'IndexId', ix.name as IndexName, coalesce(ix.type_desc,'-') as IndexType,(case when(ix.is_primary_key = 1) then 'Primary' when(ix.is_unique_constraint = 1) then 'UniqConstr' else '-' end) as ifKey, (case when(ix.is_unique = 1) then 'Uniq' else '-' end) as Uniq, ps.name AS 'Partition_Scheme'
+from dbo.sysobjects ob 
+inner join sys.schemas sc on sc.schema_id = ob.uid and ob.xtype = 'U' 
+inner join sys.indexes ix on ix.object_id = ob.id 
+left outer join sys.partition_schemes AS ps  with (nolock)
+ON ix.data_space_id = ps.data_space_id
+where ob.name in
+(
+   -- PS and tables
+SELECT  distinct object_name(tb.object_id)
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.indexes AS ix with (nolock) 
+ON ix.data_space_id = ps.data_space_id
+inner join sys.tables AS tb with (nolock)
+ON tb.object_id = ix.object_id
+)
+--and sc.name = 'Staging'
+order by sc.name, ob.name, ix.index_id
+
+-- get Table level info with row count
+SELECT   
+		schema_name(schema_id) as 'SchemaName', object_name(tb.object_id) as 'Table_Name', 		
+		pt.partition_number, dmvptst.row_count
+FROM (sys.tables AS tb 
+	INNER JOIN sys.indexes AS ix 
+		ON (tb.object_id = ix.object_id))
+	inner join sys.partitions AS pt
+		ON pt.object_id = ix.object_id
+		AND pt.index_id = ix.index_id
+	inner join sys.dm_db_partition_stats dmvptst
+		ON dmvptst.partition_id = pt.partition_id
+		AND dmvptst.object_id = ix.object_id
+		AND dmvptst.index_id = ix.index_id
+		AND dmvptst.partition_number = pt.partition_number
+where
+		ix.index_id IN (0,1)
+--and		schema_name(schema_id) = 'PPDM'
+and		tb.name in
+(
+   -- PS and tables
+SELECT  distinct object_name(tb.object_id)
+FROM sys.partition_schemes AS ps  with (nolock)
+INNER JOIN sys.indexes AS ix with (nolock) 
+ON ix.data_space_id = ps.data_space_id
+inner join sys.tables AS tb with (nolock)
+ON tb.object_id = ix.object_id
+)
+ORDER BY SchemaName, Table_Name, pt.partition_number desc;
+
+
+-- get PF level info with data files
+SELECT  distinct pf.name AS 'Partition_Function', ps.name AS 'Partition_Scheme', 
+		fg.name AS 'File_Group', df.name as 'Logical_name', df.physical_name AS 'Physical_name',
+		df.type_desc, (df.size * 8)/1000 AS File_Size_in_MB,
+		dds.destination_id AS 'Partition_Number', 
+		prv.value AS 'Range_Value'		
+FROM sys.partition_schemes AS ps  with (nolock)
+	INNER JOIN sys.destination_data_spaces AS dds  with (nolock)
+		ON ps.data_space_id = dds.partition_scheme_id
+	INNER JOIN sys.filegroups AS fg with (nolock)
+		ON dds.data_space_id = fg.data_space_id
+	INNER JOIN  sys.database_files df with (nolock)
+		ON df.data_space_id = fg.data_space_id
+	INNER JOIN sys.partition_functions pf with (nolock)
+		ON pf.function_id = ps.function_id
+	left outer JOIN sys.partition_range_values prv with (nolock)
+		ON prv.function_id = ps.function_id
+		AND prv.boundary_id = dds.destination_id
+--where
+--		pf.name = 'myPartitionFunction'
+--and		ps.name = 'myPartitionScheme'
+ORDER BY Partition_Function, Partition_Scheme, Partition_Number desc;
+
+
+---- used in the past, there is another one to use now ---- ENDs-----
+
+
+
+--alternatives. used in the past or use at present occassionally 
+
+-- col info: using only info schema (good)
+select tt1.DBNam, tt1.SchemaNam, tt1.TableNam, tt1.OrdPos, tt1.ColumnNam
+,tt1.ColDataType, tt1.CharMaxLength, tt1.IsNullable,  tt1.ColDefault
+from
+	(SELECT c1.TABLE_CATALOG as DBNam, c1.TABLE_SCHEMA as SchemaNam, c1.TABLE_NAME as TableNam, c1.ORDINAL_POSITION as OrdPos, c1.COLUMN_NAME as ColumnNam
+	,c1.DATA_TYPE as ColDataType, coalesce(c1.CHARACTER_MAXIMUM_LENGTH,'-') as CharMaxLength, c1.IS_NULLABLE as IsNullable, c1.COLUMN_DEFAULT as ColDefault, c1.COLUMN_DEFAULT
+	FROM INFORMATION_SCHEMA.COLUMNS c1
+	INNER JOIN INFORMATION_SCHEMA.TABLES t1
+	on t1.TABLE_CATALOG	= c1.TABLE_CATALOG	
+	and t1.TABLE_SCHEMA	= c1.TABLE_SCHEMA
+	and t1.TABLE_NAME	= c1.TABLE_NAME
+	and t1.TABLE_TYPE	= 'BASE TABLE'
+	) tt1
+order by tt1.DBNam, tt1.SchemaNam, tt1.TableNam, tt1.OrdPos;
+
+
+
+-- columns and constraints  (good, used occassionally)
+select tt1.DBNam, tt1.SchemaNam, tt1.TableNam, tt1.OrdPos, tt1.ColumnNam
+,tt1.ColDataType, tt1.CharMaxLength, tt1.IsNullable, tt1.ColDefault
+,coalesce(tc1.CONSTRAINT_TYPE,'-') as ConstraintType, coalesce(tc1.CONSTRAINT_NAME,'-') as ConstraintNam 
+from
+	(SELECT c1.TABLE_CATALOG as DBNam, c1.TABLE_SCHEMA as SchemaNam, c1.TABLE_NAME as TableNam, c1.ORDINAL_POSITION as OrdPos, c1.COLUMN_NAME as ColumnNam
+	,c1.DATA_TYPE as ColDataType, coalesce(c1.CHARACTER_MAXIMUM_LENGTH,'-') as CharMaxLength, c1.IS_NULLABLE as IsNullable, c1.COLUMN_DEFAULT as ColDefault, c1.COLUMN_DEFAULT
+	FROM INFORMATION_SCHEMA.COLUMNS c1
+	INNER JOIN INFORMATION_SCHEMA.TABLES t1
+	on t1.TABLE_CATALOG	= c1.TABLE_CATALOG	
+	and t1.TABLE_SCHEMA	= c1.TABLE_SCHEMA
+	and t1.TABLE_NAME	= c1.TABLE_NAME
+	and t1.TABLE_TYPE	= 'BASE TABLE'
+	) tt1
+left outer join INFORMATION_SCHEMA.CONSTRAINT_COLUMN_USAGE usg1
+on usg1.TABLE_CATALOG = tt1.DBNam
+and usg1.TABLE_SCHEMA = tt1.SchemaNam
+and usg1.TABLE_NAME = tt1.TableNam
+and usg1.COLUMN_NAME = tt1.ColumnNam
+left outer join INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc1
+on tc1.TABLE_CATALOG = usg1.TABLE_CATALOG
+and tc1.TABLE_SCHEMA = usg1.TABLE_SCHEMA
+and tc1.TABLE_NAME = usg1.TABLE_NAME
+and tc1.CONSTRAINT_NAME = usg1.CONSTRAINT_NAME
+order by tt1.DBNam, tt1.SchemaNam, tt1.TableNam, tt1.OrdPos;
+
+
+-- Index: INDEX LEVEL ONLY - less details (good, used occassionally)
+select tb.name as 'ObjectName', ix.type_desc, ix.index_id AS 'Index_Id', ix.name AS 'Index_Name',
+ix.allow_page_locks, ix.allow_row_locks,
+(case when(ix.is_primary_key = 1) then 'Primary' else '-' end) as Primary_Key, 
+(case when(ix.is_unique = 1) then 'Unique' else '-' end) as 'Unique', 
+(case when(ix.is_unique_constraint = 1) then 'UniqueConstraint' else '-' end) as 'Unique_Constraint'
+from sys.tables tb
+  join sys.schemas as sc
+    on sc.schema_id = tb.schema_id
+INNER JOIN sys.indexes AS ix 
+	ON (tb.object_id = ix.object_id)
+
+
+-- indexes : alternative (good, used in the past) 
+select sc.name as 'Schema', tb.name as 'ObjectName', ix.type_desc, ix.index_id AS 'Index_Id', ix.name AS 'Index_Name', ic.key_ordinal AS 'Key_Sequence', cl.name AS 'Column', st.name as 'Data_Type',
+(case when(ic.is_descending_key = 1) then 'DESC' else 'ASC' end) as 'Sort_Order',
+cl.column_id as 'Col_Position',
+(case when(cl.is_nullable = 1) then 'NULL' else 'NOT NULL' end)  as 'Allow_Null', 
+(case when(ix.is_primary_key = 1) then 'Primary' else '-' end) as Primary_Key, 
+(case when(ix.is_unique = 1) then 'Unique' else '-' end) as 'Unique', 
+(case when(ix.is_unique_constraint = 1) then 'UniqueConstraint' else '-' end) as 'Unique_Constraint'
+from sys.tables tb
+  join sys.schemas as sc
+    on sc.schema_id = tb.schema_id
+INNER JOIN sys.indexes AS ix 
+	ON (tb.object_id = ix.object_id)
+  join sys.index_columns as ic
+    on ic.object_id = tb.object_id
+   and ic.index_id = ix.index_id
+  join sys.columns as cl
+    on cl.object_id = tb.object_id
+   and cl.column_id = ic.column_id
+   join	sys.types   st
+	on	st.system_type_id = cl.system_type_id
+   where st.name <> 'sysname'
+   order by tb.name, ix.index_id asc, ic.key_ordinal asc;
+
+
+
+--Triggers
+select tr.[name] as TRGNam, sc.name as SchemaNam, ob.[name] as TBNam
+from sys.triggers tr inner join sys.tables ob on tr.parent_id = ob.object_id inner join sys.schemas sc on sc.schema_id = ob.schema_id
+
+
+

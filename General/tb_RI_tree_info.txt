@@ -1,0 +1,271 @@
+DECLARE @inSCName varchar(80) = 'dbo';
+DECLARE @inTBName varchar(80) ='vehicle';
+
+SET XACT_ABORT ON
+SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;
+BEGIN TRANSACTION;
+
+SET NOCOUNT ON;
+DECLARE @ErrCode int = 0;
+DECLARE @processCount tinyint = 0;
+
+DECLARE @levelNo int = 0;
+
+DECLARE @tempFKR1 TABLE
+(	 tempFKR1_id  int NOT NULL
+	,qScNameR1 varchar(80)
+	,qObNameR1  varchar(80)
+	,fkNameR1 varchar(80)
+	,fkColNameR1 varchar(80)
+	,refScNameR1 varchar(80)
+	,refTBNameR1 varchar(80)
+	,refColNameR1 varchar(80)
+	,refDelActR1 varchar(80)
+	,refUpdActR1 varchar(80)
+);
+
+
+DECLARE @holdFKR2 TABLE
+(	 holdFKR2_id  int NOT NULL
+	,qScNameR2 varchar(80)
+	,qObNameR2  varchar(80)
+	,fkNameR2 varchar(80)
+	,fkColNameR2 varchar(80)
+	,refScNameR2 varchar(80)
+	,refTBNameR2 varchar(80)
+	,refColNameR2 varchar(80)
+	,refDelActR2 varchar(80)
+	,refUpdActR2 varchar(80)
+);
+
+DECLARE @qObT1 TABLE
+(	 qObT1_id  int NOT NULL identity(1,1)
+	,qScNameT1  varchar(80)
+	,qObNameT1  varchar(80)
+);
+
+DECLARE @refObT2 TABLE
+(	 refObT2_id  int NOT NULL identity(1,1)
+	,refScNameT2  varchar(80)
+	,refObNameT2  varchar(80)
+);
+
+DECLARE @refObT3 TABLE
+(	 refObT3_id  int NOT NULL identity(1,1)
+	,refScNameT3  varchar(80)
+	,refObNameT3  varchar(80)
+);
+
+DECLARE @levelTB TABLE
+(	 levelNo  int NOT NULL
+);
+
+-- Process Children
+
+INSERT INTO @refObT3 (refScNameT3, refObNameT3)
+	VALUES(@inSCName, @inTBName);
+SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+set @processCount = 0;
+if exists (select 1 from @refObT3)
+begin
+	delete from @levelTB;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+	
+	set @levelNo = 1;
+	insert into @levelTB
+	values (@levelNo);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+	set @processCount = 1;
+end;
+
+while (@processCount = 1)
+begin
+	insert into @holdFKR2 (holdFKR2_id, qScNameR2, qObNameR2, fkNameR2, fkColNameR2, refScNameR2, refTBNameR2, refColNameR2, refDelActR2, refUpdActR2)
+	(SELECT L1.levelNo, sc.name as 'SchemaName', object_name(fk.parent_object_id) as 'ObjectName', fk.name AS 'Foreign_Key', 
+	COL_NAME(fc.parent_object_id,fc.parent_column_id) AS 'Column_Name',
+	sc1.name as 'Ref_Schema_Name',
+	OBJECT_NAME (fk.referenced_object_id) AS 'Ref_Object_Name',
+	COL_NAME(fc.referenced_object_id,fc.referenced_column_id) AS 'Ref_Column_Name',
+	fk.delete_referential_action_desc, fk.update_referential_action_desc
+	FROM sys.foreign_keys AS fk
+	INNER JOIN sys.foreign_key_columns AS fc
+	ON fk.OBJECT_ID = fc.constraint_object_id
+	inner join sys.tables tb
+	on tb.object_id = fk.referenced_object_id
+	join sys.schemas as sc
+	on sc.schema_id = tb.schema_id
+	inner join sys.tables tb1
+	on tb1.object_id = fk.parent_object_id
+	inner join sys.schemas as sc1
+	on sc1.schema_id = tb1.schema_id
+	inner join @refObT3 t3
+	on t3.refScNameT3 = sc.name
+	and t3.refObNameT3 = tb.name
+	left outer join @levelTB L1
+	on 1 = 1);
+
+
+	INSERT INTO @tempFKR1 (tempFKR1_id, qScNameR1, qObNameR1, fkNameR1, fkColNameR1, refScNameR1, refTBNameR1, refColNameR1, refDelActR1, refUpdActR1)
+	(select holdFKR2_id, qScNameR2, qObNameR2, fkNameR2, fkColNameR2, refScNameR2, refTBNameR2, refColNameR2, refDelActR2, refUpdActR2 
+	   from @holdFKR2);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	INSERT INTO @qObT1 (qScNameT1, qObNameT1)
+	(select qScNameR2, qObNameR2 
+	   from @holdFKR2);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	delete from @holdFKR2;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	delete from @refObT3;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	insert into @refObT3 (refScNameT3, refObNameT3)
+	(select distinct qScNameT1, qObNameT1 
+	   from @qObT1);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	delete from @qObT1;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	set @processCount = 0;
+	if exists (select 1 from @refObT3)
+	begin
+		delete from @levelTB;
+		SELECT @ErrCode = @@ERROR;
+		IF @ErrCode != 0 GOTO Err_Handler;
+		
+		set @levelNo = @levelNo + 1;
+		insert into @levelTB
+		values (@levelNo);
+		SELECT @ErrCode = @@ERROR;
+		IF @ErrCode != 0 GOTO Err_Handler;
+		set @processCount = 1;
+	end
+end
+
+-- clean up hold data table
+delete from @holdFKR2;
+SELECT @ErrCode = @@ERROR;
+IF @ErrCode != 0 GOTO Err_Handler;
+
+-- Process Parents
+
+INSERT INTO @qObT1 (qScNameT1, qObNameT1)
+	VALUES(@inSCName, @inTBName);
+SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+set @processCount = 0;
+if exists (select 1 from @qObT1)
+begin
+	delete from @levelTB;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+	
+	set @levelNo = 0;
+	insert into @levelTB
+	values (@levelNo);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+	set @processCount = 1;
+end;
+
+while (@processCount = 1)
+begin
+	insert into @holdFKR2 (holdFKR2_id, qScNameR2, qObNameR2, fkNameR2, fkColNameR2, refScNameR2, refTBNameR2, refColNameR2, refDelActR2, refUpdActR2)
+	(SELECT L1.levelNo, sc.name as 'SchemaName', object_name(fk.parent_object_id) as 'ObjectName', fk.name AS 'Foreign_Key', 
+	COL_NAME(fc.parent_object_id,fc.parent_column_id) AS 'Column_Name',
+	sc1.name as 'Ref_Schema_Name',
+	OBJECT_NAME (fk.referenced_object_id) AS 'Ref_Object_Name',
+	COL_NAME(fc.referenced_object_id,fc.referenced_column_id) AS 'Ref_Column_Name',
+	fk.delete_referential_action_desc, fk.update_referential_action_desc
+	FROM sys.foreign_keys AS fk
+	INNER JOIN sys.foreign_key_columns AS fc
+	ON fk.OBJECT_ID = fc.constraint_object_id
+	inner join sys.tables tb
+	on tb.object_id = fk.parent_object_id
+	join sys.schemas as sc
+	on sc.schema_id = tb.schema_id
+	inner join sys.tables tb1
+	on tb1.object_id = fk.referenced_object_id
+	inner join sys.schemas as sc1
+	on sc1.schema_id = tb1.schema_id
+	inner join @qObT1 t1 
+	on t1.qScNameT1 = sc.name
+	and t1.qObNameT1 = tb.name	
+	left outer join @levelTB L1
+	on 1 = 1);
+
+
+	INSERT INTO @tempFKR1 (tempFKR1_id, qScNameR1, qObNameR1, fkNameR1, fkColNameR1, refScNameR1, refTBNameR1, refColNameR1, refDelActR1, refUpdActR1)
+	(select holdFKR2_id, qScNameR2, qObNameR2, fkNameR2, fkColNameR2, refScNameR2, refTBNameR2, refColNameR2, refDelActR2, refUpdActR2 
+	   from @holdFKR2);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	INSERT INTO @refObT2 (refScNameT2, refObNameT2)
+	(select refScNameR2, refTBNameR2 
+	   from @holdFKR2);
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	delete from @holdFKR2;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	delete from @qObT1;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+	insert into @qObT1 (qScNameT1, qObNameT1)
+	(select distinct refScNameT2, refObNameT2
+	from   @refObT2);
+
+	delete from @refObT2;
+	SELECT @ErrCode = @@ERROR;
+	IF @ErrCode != 0 GOTO Err_Handler;
+
+
+	set @processCount = 0;
+	if exists (select 1 from @qObT1)
+	begin
+		delete from @levelTB;
+		SELECT @ErrCode = @@ERROR;
+		IF @ErrCode != 0 GOTO Err_Handler;
+		
+		set @levelNo = @levelNo - 1;
+		insert into @levelTB
+		values (@levelNo);
+		SELECT @ErrCode = @@ERROR;
+		IF @ErrCode != 0 GOTO Err_Handler;
+		set @processCount = 1;
+	end
+end
+
+select 'Referential_Constraints' as 'Info_on', @inSCName as 'Input_Schema', @inTBName as 'Input_Table';
+SELECT @ErrCode = @@ERROR;
+IF @ErrCode != 0 GOTO Err_Handler;
+
+select tempFKR1_id as 'Level', refScNameR1 as 'Parent_Schema', refTBNameR1 as 'Parent_Table', refColNameR1 as 'Referenced_Col', 
+fkNameR1 as 'Constraint', qScNameR1 as 'Child_Schema', qObNameR1 as 'Child_Table', fkColNameR1 as 'Foreign_Key', 
+refDelActR1 as 'Delete_Action', refUpdActR1 as 'Update_Action'
+from @tempFKR1 r1
+order by r1.tempFKR1_id, r1.refScNameR1, r1.refTBNameR1, r1.refColNameR1, r1.qScNameR1, r1.qObNameR1 asc;
+SELECT @ErrCode = @@ERROR;
+IF @ErrCode != 0 GOTO Err_Handler;
+
+Err_Handler:
+	ROLLBACK TRANSACTION;
+go

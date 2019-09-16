@@ -1,0 +1,12 @@
+DECLARE  @error_number INT =51000, @message NVARCHAR(128) = 'stop now for any reason', @state TINYINT = 1;
+
+BEGIN TRY
+    IF (1 = 2)
+    BEGIN 
+         ;THROW @error_number, @message, @state;
+    END           
+    SELECT 1/0
+END TRY
+BEGIN CATCH
+    ;THROW;
+END CATCH

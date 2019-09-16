@@ -1,0 +1,33 @@
+select 
+t1.database_name, t1.recovery_model, 
+case t1.[type] 
+when 'd' then 'Full DB' 
+when 'i' then 'Differential' 
+when 'l' then 'Log' 
+when 'f' then 'File or FG' 
+when 'g' then 'Diff File' 
+when 'p' then 'Partial' 
+when 'd' then 'Diff Partial' 
+end as bkup_type  --D = Full, I = Differential (cumulative), L = Tran Log (incremental)
+,COALESCE(substring(t1.physical_device_name, 1, ((len(t1.physical_device_name))-CHARINDEX(('\'), reverse(t1.physical_device_name))+1)), t1.physical_device_name) as BackupFilePath
+,COALESCE(substring(t1.physical_device_name, ((len(t1.physical_device_name))-CHARINDEX(('\'), reverse(t1.physical_device_name))+2),(len(t1.physical_device_name))), t1.physical_device_name) as BackupFileName
+,t1.backup_start_date
+,convert(decimal(12,3),round(t1.backup_size/(1.0*1024*1024*1024),3)) as Size_GB
+,t1.database_backup_lsn, t1.checkpoint_lsn, t1.first_lsn, t1.last_lsn, t1.is_copy_only, t1.backupName, t1.media_set_id
+,t1.is_compressed, t1.rank1
+from 
+(select dense_RANK() over (partition by bs1.database_name order by bs1.backup_start_date desc) as rank1
+,bs1.database_name, bs1.recovery_model, bs1.name as 'backupName', bs1.backup_start_date, bs1.[type], bs1.database_backup_lsn, bs1.checkpoint_lsn, bs1.first_lsn, bs1.last_lsn, bmf1.physical_device_name, bs1.is_copy_only, bms1.is_compressed, bs1.media_set_id, bs1.backup_size
+from msdb.dbo.backupset bs1 with (nolock)
+inner join msdb.dbo.backupmediafamily bmf1 with (nolock) on bmf1.media_set_id = bs1.media_set_id
+inner join msdb.dbo.backupmediaset bms1 on bms1.media_set_id = bs1.media_set_id
+where 
+bs1.[type] in ( 'd' ) and
+bs1.backup_start_date <= (select max(bs2.backup_start_date)
+						from msdb.dbo.backupset bs2  with (nolock)
+						where bs2.media_set_id = bs1.media_set_id
+						and   bs2.database_name = bs1.database_name
+						and   bs2.[type] = bs1.[type])
+) as t1
+where t1.rank1 <= 2 --and t1.database_name like 'db_vlf%'
+order by t1.database_name asc, t1.backup_start_date desc

@@ -1,0 +1,55 @@
+declare @SourceData TABLE (
+	Id smallint NOT NULL,
+	YearCCYY smallint NULL,
+	StatusChar CHAR(1) NULL);
+
+DECLARE @MakeOneString TABLE (
+	Id smallint NOT NULL,
+	StatusCharString VARCHAR(80) NULL
+);
+
+INSERT INTO @SourceData 
+	(Id
+	,YearCCYY
+	,StatusChar)
+VALUES 
+('1','2012','A'),
+('1','2013','B'),
+('1','2014','C'),
+('1','2015','A'),
+('1','2016','B'),
+('1','2017','C'),
+('1','2018','A'),
+
+('2','2014','A'),
+('2','2015','B'),
+('2','2016','C'),
+('2','2017','A'),
+('2','2018','B'),
+
+('3','2012','A'),
+('3','2013','B');
+
+;WITH XmlValues AS
+(
+SELECT t2.Id,
+				(
+				 SELECT t1.StatusChar
+				 FROM @SourceData  t1
+				 WHERE t1.Id= t2.Id
+				 ORDER BY t1.YearCCYY ASC
+				 FOR xml path('parent'), TYPE
+				 ) as myRow
+FROM @SourceData  t2
+)
+INSERT INTO @MakeOneString
+	(Id
+	,StatusCharString)
+SELECT DISTINCT 
+		 xmlValueTable.Id
+		,(xmlValueTable.myRow.value('.', 'VARCHAR(2000)')) as StatusCharString
+FROM		 XmlValues AS xmlValueTable;
+
+SELECT * FROM @SourceData
+SELECT * FROM @MakeOneString
+

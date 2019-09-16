@@ -1,0 +1,27 @@
+use [db1]
+go
+--> purge data from a table based on date (time), where the date time column does not have an index, or even when it has a non-clustered index
+declare @count int = 10;  --> number of rows deleted within one transaction
+declare @iteration tinyint = 0; --> initialize iteration counter
+declare @iterationMax tinyint = 6; --> set how many batches do you want to run in one execution
+declare @KeystrokeRequestID int;
+declare @purgedate datetime = '2005-12-31 00:00:00.000'; --> set purge date. data older than this date time will be deleted
+
+select top 1 @KeystrokeRequestID = ksr1.KeystrokeRequestID --> get the tipping point for the purge criteria
+from dbo.KeystrokeRequest ksr1 with (nolock) --> avoid locking during the scan
+where ksr1.CreateDate <= @purgedate  --> this will avoid scanning multiple times
+
+while exists (select 1 from dbo.KeystrokeRequest ksr1 with (nolock) where ksr1.KeystrokeRequestID <= @KeystrokeRequestID) and @iteration < @iterationMax
+begin
+begin tran 
+select top (@count) ksr1.KeystrokeRequestID , * --> change this select to delete
+from dbo.KeystrokeRequest ksr1 with (nolock)
+where ksr1.KeystrokeRequestID <= @KeystrokeRequestID --> reducing locking, by using the clustered index seek
+--> since we will be deleting data older than 12/31/2012 anyway, it does not matter the order in which delete them. and you  gain perf
+-->> additionally, add the belwo statement to ensure we are not deleting data newer than 12/31/2012
+and ksr1.CreateDate <= @purgedate
+commit;
+set @iteration = @iteration + 1;
+end
+
+

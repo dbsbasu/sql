@@ -1,0 +1,150 @@
+
+
+
+Exec xp_logininfo 'domain\windows_user','all' -- this account is a member of all the groups displayed
+Exec xp_logininfo 'domain\windows_group','members' -- this windows group has following members
+
+
+disconnect from a sql server 
+xp_cmdshell 'qwinsta' -- Query Windows Station
+--get the ID (ex 2) againt the user to be disconnected and run as below
+--xp_cmdshell 'RWinsta 2' -- Reset Windows Station
+
+
+
+-- full text catalog
+select fulltextserviceproperty('isfulltextinstalled') as Is_FullText_Installed
+
+EXEC sp_msForEachDB ' 
+if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'',''[ResourceDb]'',''[dbaUtils]'') return
+use [?] 
+select DatabaseProperty(db_name(), ''IsFulltextEnabled'') as Is_Fulltext_Enabled , db_name() as DBName 
+'
+
+
+
+--rename FGs
+ALTER DATABASE db_Author MODIFY FILEGROUP [ftfg_FTCatalog_QML] NAME = [db_Author]
+go
+
+--rename Files: Note the existing file names before renaming
+ALTER DATABASE db_Author SET OFFLINE
+go
+ALTER DATABASE db_Author 
+MODIFY FILE (NAME = ftrow_FTCatalog_QML, FILENAME = 'E:\SQLdrive1\db_Author_file.ndf');
+go
+-- rename the file in OS
+
+ALTER DATABASE db_Author SET ONLINE
+go
+
+
+--kill, rollback, statement only
+kill.. rollback... statement only
+
+-- contig
+DBCC SHOWCONTIG ("HumanResources.Employee");
+
+
+-- stats --
+dbcc show_statistics ("schema.table", ix);
+example:
+dbcc show_statistics ("dbo.table", table_NC);
+
+
+set statistics profile on/off
+
+
+
+-------- worker threads begins-------
+execute DBCC SQLPERF (UMSSTATS)  
+--This will show you how many threads are waiting for each processor on the machine.
+-------- worker threads ends-------
+
+
+
+------ IFI_enabled begins----
+xp_cmdshell 'whoami/priv'
+--should show perform volume maintenance
+--SeManageVolumePrivilege         Perform volume maintenance tasks          Enabled 
+------ IFI_enabled ends----
+
+
+
+------ inputbuffer
+dbcc inputbuffer (85)
+
+
+-------object proerty
+SELECT objectproperty(object_id(N'my_db.my_table'), 'IsTable')
+SELECT columnproperty(object_id(N'my_table'), 'Rcpnt_Nam', 'UsesAnsiTrim')
+SELECT   SESSIONPROPERTY ('ANSI_PADDING')
+
+
+
+--------------log space related begins-----------------
+simple recovery database but checkpoint does not free the space [dbcc sqlperf(logspace)]. 
+see if there are any open transaction in the database [dbcc opentran]
+please kill any (days-)old tran sitting out there. 
+after killing any open tran run the dbcc opentran again to verify 
+if there are more open trans (it only gives one at a time)
+try checkpoint now
+
+
+-- whether simple
+select db1.database_id, db1.name, db1.recovery_model, db1.recovery_model_desc
+from master.sys.databases db1 (nolock)
+
+-- log space usage
+dbcc sqlperf(logspace)
+
+-- try checkpoint
+checkpoint
+
+-- is there any open tran
+dbcc opentran
+
+-- tuncate only to clear the log
+BACKUP LOG [my_db_TWQ] WITH TRUNCATE_ONLY
+
+
+-- for other log backup
+BACKUP LOG [my_db_TWQ] to disk = N'\\db_srvr\D$\backup\logs\my_db_TWQ\my_db_TWQ201109151135.trn'
+
+--------------log space related ends-----------------
+
+
+--kill a rollback tran
+ALTER DATABASE <dbname> SET RESTRICTED_USER WITH ROLLBACK IMMEDIATE
+--You may I believe actually alter the db to any state which it is not in.  The only other option is to restart SQL.
+
+
+
+
+
+
+sp_configure 'show advanced options', 1;
+GO
+RECONFIGURE;
+GO
+exec sp_configure
+go
+sp_configure 'clr enabled', 1;
+GO
+RECONFIGURE;
+GO
+
+exec sp_configure
+go
+
+
+
+-- clean up guest deny's
+sp_helprotect
+revoke execute on fn_diagramobjects to guest 
+revoke execute on sp_alterdiagram to guest
+revoke execute on sp_creatediagram to guest
+revoke execute on sp_dropdiagram to guest
+revoke execute on sp_helpdiagramdefinition to guest
+revoke execute on sp_helpdiagrams to guest
+revoke execute on sp_renamediagram to guest

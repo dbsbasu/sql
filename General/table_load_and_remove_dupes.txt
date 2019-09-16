@@ -1,0 +1,73 @@
+--sample table load and remove duplicate data
+if  exists (select 1 from sys.objects where object_id = object_id(N'dbo.sq_id') and type in (N'SO'))
+drop sequence dbo.sq_id;
+go
+create sequence dbo.sq_id
+as int
+start with 1
+increment by 1
+cache;
+go
+
+if  exists (select 1 from sys.objects where object_id = object_id(N'dbo.testData') and type in (N'u'))
+drop table dbo.testData;
+go
+create table dbo.testData (
+ seqID int not null
+,testGUID uniqueidentifier not null constraint DF_testID default newid()
+,fillData varchar(80) null
+,recAddDatetime datetime2 not null constraint DF_recAddDatetime default sysdatetime()
+) on [primary]
+
+if exists (select 1 from sys.objects where object_id = object_id(N'dbo.testData') and type in (N'u')) and
+   exists (select 1 from sys.indexes where name = 'ix_testdata')
+drop index ix_testdata on dbo.testdata;
+go
+create clustered index ix_testdata on dbo.testdata
+(seqID asc) with (pad_index = on, fillfactor = 100) on [primary];
+go
+
+if exists (select 1 from sys.objects where object_id = object_id(N'dbo.testData') and type in (N'u')) and
+   exists (select 1 from sys.objects where object_id = object_id(N'PK_testData') and type in (N'pk'))
+alter table dbo.testData drop constraint PK_testData;
+go
+alter table dbo.testData with check
+add constraint PK_testData primary key nonclustered 
+(testGUID asc) with (pad_index = on, fillfactor =90) on [primary];
+
+if  exists (select * from sys.objects where object_id = object_id(N'dbo.usp_addRec') and type in (N'p',N'pc'))
+drop procedure dbo.usp_addRec;
+go
+create procedure dbo.usp_addRec
+ @addRec int
+,@replicateChar char(5)
+as
+set nocount on;
+declare @nextSeq int;
+declare @iterate int = 1;
+
+while @iterate <= @addRec
+begin
+	select @nextSeq = next value for dbo.sq_id;
+	insert into dbo.testData (seqID, fillData) values (@nextSeq,replicate(@replicateChar,10))
+	set @iterate = @iterate + 1;
+end
+go
+
+--run the below SP with few times with different @replicateChar values
+exec dbo.usp_addRec @addRec = 10, @replicateChar = '1Work';
+exec dbo.usp_addRec @addRec = 50, @replicateChar = '2Play';
+exec dbo.usp_addRec @addRec = 100, @replicateChar = '3Love';
+
+select * from dbo.testData order by fillData, seqID;
+
+--find all dupes
+;with dupes as
+(select row_number() over (partition by fillData order by fillData) as slice_id, * from dbo.testdata )
+delete from dupes output  deleted.seqID, deleted.testGUID, deleted.fillData, deleted.recAddDatetime where slice_id <> 1;
+
+select seqID, testGUID, fillData, recAddDatetime
+from dbo.testData
+order by fillData, seqID;
+
+

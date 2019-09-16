@@ -1,0 +1,61 @@
+/*
+--PART 1
+
+--prep step starts
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+SET ANSI_PADDING ON
+GO
+if exists (select 1 from sys.objects where object_id = object_id(N'dbo.RestoreSuccess') and type in (N'u'))
+drop table [dbo].[RestoreSuccess];
+CREATE TABLE [dbo].[RestoreSuccess](
+	[dbName] [varchar](50) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[tLogName] [varchar](100) COLLATE SQL_Latin1_General_CP1_CI_AS NOT NULL,
+	[successTime] [datetime] NOT NULL,
+ CONSTRAINT [PK_restoreSuccess] PRIMARY KEY CLUSTERED 
+(
+	[dbName] ASC
+)WITH (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+delete  FROM  [dbo].[RestoreSuccess]
+INSERT INTO dbo.RestoreSuccess (DBName, tLogName, successTime) values ('YesChangeMe', 'YesChangeMe_tlog_20150617010001.TRN', '2015-06-17 01:00:00.001')
+INSERT INTO dbo.RestoreSuccess (DBName, tLogName, successTime) values ('NoDoNotTouchMe', 'NoDoNotTouchMe_tlog_20150617010001.TRN', '2015-06-17 01:00:00.001')
+--prep step ends
+*/
+
+--PART 2
+
+select 'before merge' as stepWhen
+select *  FROM  [dbo].[RestoreSuccess]
+
+MERGE 
+   [dbo].[RestoreSuccess] rs1
+USING ( 
+    values ('YesChangeMe', 'YesChangeMe_tlog_20150616055555.TRN', '2015-06-17 05:55:55.557')
+) AS new1 (DBName, tLogName, successTime ) 
+ON rs1.dbName = new1.dbName 
+WHEN MATCHED THEN
+   UPDATE SET rs1.tLogName = new1.tLogName, rs1.successTime = new1.successTime
+WHEN NOT MATCHED THEN
+   INSERT (DBName, tLogName, successTime)
+   VALUES (new1.DBName, new1.tLogName, new1.successTime);
+
+MERGE 
+   [dbo].[RestoreSuccess] rs1
+USING ( 
+    values ('HeyImTheNewGuy', 'HeyImTheNewGuy_tlog_20150617011111.TRN', '2015-06-17 01:11:11.110')
+) AS new1 (DBName, tLogName, successTime ) 
+ON rs1.dbName = new1.dbName 
+WHEN MATCHED THEN
+   UPDATE SET rs1.tLogName = new1.tLogName, rs1.successTime = new1.successTime
+WHEN NOT MATCHED THEN
+   INSERT (DBName, tLogName, successTime)
+   VALUES (new1.DBName, new1.tLogName, new1.successTime);
+
+select 'after merge' as stepWhen
+select *  FROM  [dbo].[RestoreSuccess]
+
+

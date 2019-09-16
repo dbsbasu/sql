@@ -1,0 +1,28 @@
+drop table if exists dbo.t1;
+create table dbo.t1 (id INT NOT NULL IDENTITY(1,1), A INT, B INT, C INT);
+drop index if exists cix_t1 on dbo.t1;
+create clustered index cix_t1 on dbo.t1 (id ASC);
+drop index if exists nci_AB on dbo.t1;
+CREATE NONCLUSTERED INDEX nci_AB ON dbo.t1 (A ASC) INCLUDE (B);
+drop index if exists nci_BC on dbo.t1;
+CREATE NONCLUSTERED INDEX nci_BC ON dbo.t1 (B ASC, C ASC) WHERE B IS NOT NULL;
+
+SET NOCOUNT ON;
+declare @i int = 0;
+
+while (@i <= 10000)
+begin
+    IF @i <= 10
+        insert into dbo.t1 (A, B, C) VALUES (@i, @i*10, @i*100);
+    ELSE
+        insert into dbo.t1 (A, B, C) VALUES (@i, NULL, @i*100);
+    set @i = @i + 1;
+end
+
+
+SELECT C
+FROM dbo.t1 t1
+WHERE A between 0 AND 10 --AND B IS NOT NULL 
+OPTION (TABLE HINT(t1, INDEX (nci_BC)))
+
+--SELECT TOP 100 * FROM dbo.t1

@@ -1,0 +1,127 @@
+--keep two query windows open. run this script in one and use the other one to run backup 2 statements that have been commented out here
+--test: tlog backup will have all the recoreds since last tlog backup, regardless of commits and checkpoints
+--creating database
+set nocount on;
+CREATE DATABASE [TLogDB1]
+ CONTAINMENT = NONE
+ ON  PRIMARY 
+( NAME = N'TLogDB1', FILENAME = N'N:\Mounts\Data\TLogDB1.mdf' , SIZE = 10240KB , FILEGROWTH = 0)
+ LOG ON 
+( NAME = N'TLogDB1_log', FILENAME = N'N:\Mounts\Logs\TLogDB1_log.ldf' , SIZE = 10240KB , FILEGROWTH = 0)
+GO
+alter authorization on database::TLogDB1 to sa
+GO
+USE [TLogDB1]
+GO
+ALTER DATABASE [TLogDB1] SET RECOVERY SIMPLE 
+GO
+
+--creating table
+CREATE TABLE [dbo].[TLogTable1](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[comments] [varchar](80) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	recAddTimestamp datetime2 not null constraint df_recAddTimestamp default sysdatetime(),
+ CONSTRAINT [PK_TLogTable1] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = ON, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+SET ANSI_PADDING OFF
+GO
+
+--set database in FULL Recovery, of course, take a full backup and a tran log backup
+ALTER DATABASE [TLogDB1] SET RECOVERY FULL 
+GO
+BACKUP DATABASE [TLogDB1] 
+TO DISK = N'N:\Mounts\Backups\TestDB\TLogDB1_01Oct2015.bak' 
+WITH COMPRESSION, NOFORMAT, NOINIT, NAME =N'Full DB Backup', SKIP, NOREWIND, NOUNLOAD,  STATS = 10;
+BACKUP LOG [TLogDB1] TO DISK = N'N:\Mounts\Backups\TestDB\TLogDB1_tlog_0.trn';
+
+--------------------TEST BEGINS
+--begin explicit tran, add data, backup tlog, issue checkpoint, backup tlog, commit tran, backup tlog, issue checkpoint, backup tlog
+begin tran test1
+
+INSERT INTO [dbo].[TLogTable1] ([comments])  VALUES ('a1b2c3');
+
+waitfor delay '0:00:15'
+-->> BACKUP LOG [TLogDB1] TO DISK = N'N:\Mounts\Backups\TestDB\TLogDB1_tlog_1.trn';
+
+UPDATE [dbo].[TLogTable1] SET [comments] = 'd4e5f6';
+checkpoint;
+
+waitfor delay '0:00:15'
+-->> BACKUP LOG [TLogDB1] TO DISK = N'N:\Mounts\Backups\TestDB\TLogDB1_tlog_2.trn';
+
+DELETE FROM [dbo].[TLogTable1];
+commit tran test1;
+
+BACKUP LOG [TLogDB1] TO DISK = N'N:\Mounts\Backups\TestDB\TLogDB1_tlog_3.trn';
+
+checkpoint;
+
+BACKUP LOG [TLogDB1] TO DISK = N'N:\Mounts\Backups\TestDB\TLogDB1_tlog_4.trn';
+--------------------TEST ENDS
+
+--set database single_user and drop 
+/*
+use [master]
+go
+ALTER DATABASE [TLogDB1] SET  SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+DROP DATABASE [TLogDB1]
+GO
+*/
+
+/*
+SELECT    
+[Current LSN],
+[Operation],
+[Context],
+[Transaction ID],
+[Description],
+[page id],
+[checkpoint begin],
+[checkpoint end],
+[SPID],
+[Oldest Active Transaction ID],
+[xact id],
+[Lock Information]
+FROM
+    fn_dump_dblog (
+        NULL, NULL, N'DISK', 1, N'N:\Mounts\Backups\TestDB\TLogDB1_tlog_4.trn',
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT);
+*/
+
+/*
+test results :  use query above to look at 4 tran log backups
+
+tlog_1 :	look for "test1" under description, note the transaction id
+			begin tran. LOP_BEGIN_XACT, test1;..., page id, lock info
+			acquire locks and format and modify pages (various)
+			add rows. LOP_INSERT_ROWS  (look at page id)
+
+tlog_2 :	filter based on transaction id which you noted noted above
+			update data. LOP_MODIFY_ROW, LCX_CLUSTERED (look at page id, lock info)
+			remove filtering. checkpoint was issued. LOP_BEGIN_CKPT and LOP_END_CKPT
+
+tlog_3 :	filter based on transaction id which you noted noted above
+			delete data. LOP_DELETE_ROWS, LCX_MARK_AS_GHOST (look at page id)
+			commit. LOP_COMMIT_XACT
+
+tlog_4 :	no filtering.
+			checkpoint was issued. LOP_BEGIN_CKPT and LOP_END_CKPT
+
+
+conclusion: 
+tlog backup will have all the recoreds since last tlog backup, regardless of commits and checkpoints
+
+*/

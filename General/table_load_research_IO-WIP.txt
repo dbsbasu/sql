@@ -1,0 +1,138 @@
+----preparation: create source database and start perfmon for disk read / sec and disk write / sec
+--create db and table
+--take a full backup 
+--restore with norecovery
+
+----Objective 1: what happens when you insert new pages at the end of a clustered index
+--create table on source database
+--take a full backup 
+--restore with norecovery
+--start capturing perfmon disk read and write
+--insert 1000 pages, 10 records on each page
+--issue checkpoint
+--run a tran log backup
+--replay the saved tran log backups onto a DR database in norecovery state 
+
+
+----Objective 1A: what happens when you insert data into existing pages
+--drop DR database
+--create table on source database
+--insert 1000 pages, 10 records on each page
+--delete all id values that are NOT divisible by 10
+--verify that after this operation, the table retains the pages: DATA_PAGE	1000, IAM_PAGE	1, INDEX_PAGE		4
+--issue checkpoint
+--flush memory
+--take a full backup 
+--restore with norecovery
+--start capturing perfmon disk read and write
+--insert deleted id values
+--issue checkpoint
+--run a tran log backup
+--replay the saved tran log backups onto a DR database in norecovery state 
+
+
+----Objective 2: what happens when you update all records
+--drop DR database
+--delete all data from the table
+--insert 1000 pages, 10 records on each page
+--issue checkpoint
+--flush memory
+--take a full backup 
+--restore with norecovery
+--update all records
+--issue checkpoint
+--run a tran log backup
+--replay the saved tran log backups onto a DR database in norecovery state 
+
+
+----Objective 3: what happens when you update specific records after a clustered index scan
+--drop DR database
+--delete all data from the table
+--insert 1000 pages, 10 records on each page
+--issue checkpoint
+--flush memory
+--take a full backup 
+--restore with norecovery
+--update few records
+--issue checkpoint
+--run a tran log backup
+--replay the saved tran log backups onto a DR database in norecovery state 
+
+
+--create a table and clustered index
+create table dbo.testData (
+id int not null
+,fillData varchar(800) null
+,recAddDatetime datetime2 not null constraint DF_recAddDatetime default sysdatetime()
+) on [primary];
+create unique clustered index uq_testdata on dbo.testdata (id asc) with (pad_index = on, fillfactor = 100) on [primary];
+
+--add data into table
+set nocount on;
+declare @id int = 0, @iterate int = 0, @addrows int;
+set @addrows = 10000 --> set number of inserts
+select @id = 1 + coalesce(max(id),0) from dbo.testData;
+--set @id = 51 --> uncomment to override id value
+---->(a)set id = 0 and the if statement below... this will insert id values that are NOT divisible by 10
+--set @id = 0 --> uncomment to override id value
+set @iterate = @id + @addrows - 1;
+select 'next id starts at: ' + cast (@id as varchar(10)) 
+          + ' / ends at: '  + cast (@iterate as varchar(10)) 
+		  + ' / adding ' + cast(@addrows as varchar(10)) + ' rows ; ';
+
+while @id <= @iterate
+begin
+--			set statistics profile on
+--			set statistics io on
+---->(a)if statement will insert id values that are NOT divisible by 10
+--if @id % 10 != 0
+	insert into dbo.testData (id, fillData) values (@id, replicate('a',781))
+--	checkpoint
+--			set statistics io off
+--			set statistics profile off
+	set @id = @id + 1;
+end
+
+--delete all id values that are NOT divisible by 10
+--delete from dbo.testData where id % 10 != 0
+--verify exising data, containing multiples of 10 only
+select * from dbo.testData order by id asc
+
+
+--update specific data with clustered index scan
+--update dbo.testData set fillData = replicate('X',781) where recAddDatetime = '2016-06-13 11:35:20.4828834'
+
+
+--clean up memory
+checkpoint
+dbcc dropcleanbuffers
+dbcc freeproccache
+dbcc freesessioncache 
+dbcc freesystemcache ('all');  
+
+
+--take a full backup
+backup database [db_inserts] to disk = N'N:\Mounts\Backups\db_inserts_FULL.bak' with stats = 10
+
+--restore the full backup
+restore database [db_inserts_DR] from disk = N'\\ql2sqllab2014\N$\Mounts\Backups\db_inserts_FULL.bak'
+with file = 1, 
+move N'db_inserts'     to N'N:\Mounts\Data\db_inserts_DR.mdf',
+move N'db_inserts_log' to N'N:\Mounts\Logs\db_inserts_log_DR.ldf',
+standby = N'N:\Mounts\Backups\db_inserts_DR_UNDO.ldf'  
+
+--take a TLOG backup
+backup log [db_inserts] to disk = N'N:\Mounts\Backups\db_inserts_log1.trn' 
+
+--restore log backups
+restore log [db_inserts_DR] from disk = N'\\ql2sqllab2014\N$\Mounts\Backups\db_inserts_log1.trn' 
+with standby = N'N:\Mounts\Backups\db_inserts_DR_UNDO.ldf'  
+
+
+
+-- verify page allocations
+select object_name(ddpa1.object_id) as objectName, ix1.name as indexName, ddpa1.page_type_desc, count(ddpa1.page_type_desc) page_counts
+from sys.dm_db_database_page_allocations(db_id(), object_id('dbo.testData'), null, null, 'DETAILED') ddpa1
+left outer join sys.indexes ix1 on ix1.object_id = ddpa1.object_id
+where ddpa1.is_allocated = 1
+group by object_name(ddpa1.object_id), ix1.name, ddpa1.page_type_desc;

@@ -1,0 +1,13 @@
+drop table dbo.tChild;
+create table dbo.tChild (comment varchar(20),name varchar(20));
+
+drop table dbo.tParent;
+create table dbo.tParent (name varchar(20) /*PK requires it to be non-null*/ /*not null*/);
+create unique nonclustered index UX_tParent on dbo.tParent (name asc); --> unique index is sufficient to be referenced for FK
+--alter table dbo.tParent with check add constraint UC_tParent unique (name asc);
+--alter table dbo.tParent with check add constraint PK_tParent primary key (name asc);
+
+alter table dbo.tChild with check
+add constraint fk_tChild_tParent foreign key (name) 
+references dbo.tParent (name);
+

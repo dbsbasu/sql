@@ -1,0 +1,6 @@
+--if drs1.last_log_backup_lsn is not null, then it is NOT in pseudo-simple mode
+select db_name(drs1.database_id) as DBName, d1.recovery_model_desc,
+case when drs1.last_log_backup_lsn is null then 'pseudo-simple' else d1.recovery_model_desc end as recovery_model_in_reality
+--, drs1.recovery_fork_guid, drs1.first_recovery_fork_guid,drs1.fork_point_lsn
+from sys.database_recovery_status drs1 with (nolock)
+inner join sys.databases d1  with (nolock) on d1.database_id = drs1.database_id and d1.recovery_model in (1,2)

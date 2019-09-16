@@ -1,0 +1,12 @@
+declare @errorlog table
+(logdate datetime, processInfo varchar(800), texts varchar(4000)
+)
+
+insert into @errorlog
+EXEC sys.xp_readerrorlog 1 --current log = 0, archive = 1,2,...
+
+select * from @errorlog t1
+where t1.logdate between '2013-01-05 02:00:00.000' and '2013-01-05 05:30:30.000'
+and t1.processInfo not in ('Logon','Backup')
+order by t1.logdate asc
+

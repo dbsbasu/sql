@@ -1,0 +1,54 @@
+declare @SourceData TABLE (
+	Id smallint NOT NULL,
+	YearCCYY smallint NULL,
+	StatusChar CHAR(1) NULL);
+
+DECLARE @StringCount TABLE (
+	Id VARCHAR(15) NOT NULL,
+	StatusChar_A SMALLINT NULL,
+	StatusChar_B SMALLINT NULL,
+	StatusChar_C SMALLINT NULL);
+
+INSERT INTO @SourceData 
+	(Id
+	,YearCCYY
+	,StatusChar)
+VALUES 
+('1','2012','A'),
+('1','2013','B'),
+('1','2014','C'),
+('1','2015','A'),
+('1','2016','B'),
+('1','2017','C'),
+('1','2018','A'),
+
+('2','2014','A'),
+('2','2015','B'),
+('2','2016','C'),
+('2','2017','A'),
+('2','2018','B'),
+
+('3','2012','A'),
+('3','2013','B');
+
+
+INSERT INTO @StringCount 
+	(	Id,
+		StatusChar_A,
+		StatusChar_B,
+		StatusChar_C)
+SELECT  Id,
+		[A],
+		[B],
+		[C]
+FROM
+(   SELECT t1.Id, t1.StatusChar, t1.StatusChar_Count
+    FROM	(SELECT		t1.Id, t1.StatusChar, count(t1.StatusChar) AS StatusChar_Count 
+			 FROM		@SourceData t1 
+			 GROUP BY	t1.Id, t1.StatusChar
+			 ) AS t1
+) AS SourceTable 
+PIVOT(Max(StatusChar_Count) FOR StatusChar IN ([A],[B],[C])) AS PivotTable;
+
+SELECT * FROM @SourceData
+SELECT * FROM @StringCount

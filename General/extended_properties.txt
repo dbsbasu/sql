@@ -1,0 +1,64 @@
+        EXEC sys.sp_addextendedproperty 
+          @name  = N'sp Caption'
+         ,@value = N'sp'
+         ,@level0type = N'SCHEMA'
+         ,@level0name = N'DE'
+         ,@level1type = N'TABLE'
+         ,@level1name = 'sp'
+--		 ,@level2type = N'Column'
+--       ,@level2name = 'sp1'
+		 ;
+
+        EXEC sys.sp_updateextendedproperty 
+          @name  = N'sp3 Caption'
+         ,@value = N'sp3 2'
+         ,@level0type = N'SCHEMA'
+         ,@level0name = N'DE'
+         ,@level1type = N'TABLE'
+         ,@level1name = 'sp3'
+--		 ,@level2type = N'Column'
+--       ,@level2name = 'sp3'
+		 ;
+
+        EXEC sys.sp_dropextendedproperty 
+          @name  = N'sp4 Caption'
+         ,@level0type = N'SCHEMA'
+         ,@level0name = N'DE'
+         ,@level1type = N'TABLE'
+         ,@level1name = 'sp4'
+		 ,@level2type = N'Column'
+         ,@level2name = 'sp4'
+		 ;
+
+
+
+SELECT 
+	CASE class 
+		WHEN 1 THEN 
+			(
+				SELECT SCHEMA_NAME(o.schema_id)
+				FROM sys.objects o
+				WHERE o.object_id = major_id
+			) 
+		END AS SchemaName,
+	CASE class 
+		WHEN 0 THEN DB_NAME()
+		WHEN 1 THEN OBJECT_NAME(major_id)
+		WHEN 3 THEN SCHEMA_NAME(major_id)
+		END AS ObjectName,
+	CASE class
+		WHEN 1 THEN
+			(
+				SELECT c.name
+				FROM sys.columns c
+				WHERE c.object_id = major_id
+				AND c.column_id = minor_id
+			)
+		END AS ColumnName,
+	name as PropertyName,
+	value as PropertyValue,
+	class_desc,
+	major_id,
+	minor_id
+FROM sys.extended_properties;
+GO

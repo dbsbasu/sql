@@ -1,0 +1,29 @@
+-- READ_COMMITTED_SNAPSHOT (is_read_committed_snapshot_on) will not require any changes on sql statement. sql statement level. will start row-versioning when txns use read-committed isolation
+
+-- ALLOW_SNAPSHOT_ISOLATION (snapshot_isolation_state_desc) will require explicitly setting up of snapshot isolation on every transaction. at transaction level
+
+SELECT name, is_read_committed_snapshot_on, snapshot_isolation_state_desc 
+from sys.databases 
+where name = 'test_snapshot'
+
+alter database test_snapshot
+set READ_COMMITTED_SNAPSHOT on
+
+SELECT name, is_read_committed_snapshot_on, snapshot_isolation_state_desc 
+from sys.databases 
+where name = 'test_snapshot'
+
+alter database test_snapshot
+set ALLOW_SNAPSHOT_ISOLATION on
+
+SELECT name, is_read_committed_snapshot_on, snapshot_isolation_state_desc 
+from sys.databases 
+where name = 'test_snapshot'
+
+SELECT name, is_read_committed_snapshot_on, snapshot_isolation_state_desc 
+from sys.databases 
+where name = 'test_snapshot'
+
+
+
+

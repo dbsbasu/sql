@@ -1,0 +1,23 @@
+-- get all sessions participating in the locking-blocking chain and identify lead blockers
+;with blockers as
+(
+select distinct der_blockers.blocking_session_id as blocking_id
+from sys.dm_exec_requests der_blockers
+where der_blockers.blocking_session_id != 0
+)
+select 
+db_name(des.database_id) as dbName,
+des.session_id, blocking_desc = 'LEAD blocker', der_text.text as sql_text, des.last_request_start_time as req_start_time, des.login_name, des.[host_name]
+from sys.dm_exec_sessions des
+inner join blockers on des.session_id = blockers.blocking_id
+inner join sys.dm_exec_connections decn on decn.most_recent_session_id = blockers.blocking_id
+cross apply sys.dm_exec_sql_text(decn.most_recent_sql_handle) as der_text
+where not exists(select 1 from sys.dm_exec_requests der0 where des.session_id = der0.session_id and der0.blocking_session_id != 0)union all
+select 
+db_name(des1.database_id) as dbName,
+des1.session_id, blocking_desc = ' victim ' + cast(des1.session_id as varchar(10)) + ' blocked by session ' + cast(der1.blocking_session_id as varchar(10)), der1_text.text as sql_text, des1.last_request_start_time as req_start_time, des1.login_name, des1.[host_name]
+from sys.dm_exec_sessions des1
+inner join sys.dm_exec_requests der1 on der1.session_id = des1.session_id
+cross apply sys.dm_exec_sql_text(der1.sql_handle) as der1_text
+where der1.blocking_session_id != 0
+order by req_start_time asc, blocking_desc asc

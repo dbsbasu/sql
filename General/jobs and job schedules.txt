@@ -1,0 +1,86 @@
+SELECT  job.name, job.enabled, job.description, job.start_step_id, catg.name, dbp.name, job.date_created, job.date_modified
+FROM    msdb.dbo.sysjobs job
+LEFT OUTER JOIN msdb.dbo.syscategories AS catg ON catg.category_id = job.category_id
+LEFT OUTER JOIN msdb.sys.database_principals AS dbp ON dbp.sid = job.owner_sid
+WHERE job.name = N'xxx'
+;
+
+SELECT 
+ job.name
+,step.step_id
+,step.step_name
+,step.subsystem
+,step.command 
+,step.database_name
+,CASE step.on_success_action
+    WHEN 1 THEN 'Quit the job reporting success'
+    WHEN 2 THEN 'Quit the job reporting failure'
+    WHEN 3 THEN 'Go to the next step'
+    WHEN 4 THEN 'Go to step'
+    ELSE ''
+END AS on_success_action
+,step.on_success_step_id
+,CASE step.on_fail_action
+    WHEN 1 THEN 'Quit the job reporting success'
+    WHEN 2 THEN 'Quit the job reporting failure'
+    WHEN 3 THEN 'Go to the next step'
+    WHEN 4 THEN 'Go to step'
+    ELSE ''
+END AS on_fail_action
+,step.on_fail_step_id
+,step.last_run_duration
+,step.last_run_date
+,step.last_run_time
+,CASE step.last_run_outcome
+    WHEN 0 THEN 'Failed'
+    WHEN 1 THEN 'Succeeded'
+    WHEN 2 THEN 'Retry'
+    WHEN 3 THEN 'Canceled'
+    WHEN 5 THEN 'UNKNOWN'
+    ELSE ''
+END AS last_run_outcome
+FROM    msdb.dbo.sysjobsteps step
+INNER JOIN  msdb.dbo.sysjobs job ON job.job_id = step.job_id
+WHERE job.name = N'xxx'
+
+
+SELECT 
+ job.name
+,sched.schedule_id
+,sched.name
+,sched.enabled
+,CASE 
+    WHEN sched.freq_type = 1 THEN 'One time only'
+        
+    WHEN sched.freq_type = 4 THEN 'Daily ' + CAST(freq_interval AS VARCHAR(80)) + ' time(s)'
+    WHEN sched.freq_type = 8 THEN 'Weekly ' + CAST(freq_interval AS VARCHAR(80)) + ' time(s)'
+    WHEN sched.freq_type = 16 THEN 'Monthly' 
+    --need to do it or search as I think i have done somewhere (YES IN POWERSHELL JOB RETRIEVAL)
+    --https://docs.microsoft.com/en-us/sql/relational-databases/system-tables/dbo-sysschedules-transact-sql?view=sql-server-2017
+    WHEN sched.freq_type = 32 THEN 'Monthly, relative to freq_interval'
+    WHEN sched.freq_type = 64 THEN 'Runs when the SQL Server Agent service starts'
+    WHEN sched.freq_type = 128 THEN 'Runs when the computer is idle'
+END AS freq_type_and_interval
+,sched.freq_subday_type
+,sched.freq_subday_interval
+,CASE sched.freq_relative_interval
+    WHEN 0 THEN 'freq_relative_interval is unused'
+    WHEN 1 THEN 'FIRST'
+    WHEN 2 THEN 'Second'
+    WHEN 4 THEN 'Third'
+    WHEN 8 THEN 'Fourth'
+    WHEN 16 THEN 'Last'
+END AS freq_relative_interval
+,sched.freq_recurrence_factor
+,sched.active_start_date
+,sched.active_start_time
+,sched.active_end_date
+,sched.active_end_date
+,sched.date_created
+,sched.date_modified
+FROM msdb.dbo.sysschedules sched
+INNER JOIN  msdb.dbo.sysjobschedules jobsched ON jobsched.schedule_id = sched.schedule_id
+INNER JOIN  msdb.dbo.sysjobs job ON job.job_id = jobsched.job_id
+WHERE job.name = N'xxx'
+
+

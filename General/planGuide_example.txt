@@ -1,0 +1,98 @@
+		SELECT DISTINCT 
+		  [fpal].yyyExprDate   as xxxExpirationDate  
+		, fpal.yyyNbr	as xxxNumber					   	    -- xxx number
+		, [fpal].[RnwCntr]		as RenewalCounter				   	    -- renewal counter
+		, [fpal].[StrategicAllianceFlg]					-- strategic alliance indicator
+		, [dpc].[StateCode]								-- xxx state
+        , ' ' as BrandCode                     	    -- no longer carried in ops
+		, [dpi].[DrvLastName]	as myselfLastName			   	 	-- myself last name
+		, [dpi].[DrvFirstName]	as myselfFirstName					  -- myself first name
+        , [dpi].[DrvMidName]  as myselfMiddleName
+		, [dpi].[DrvSuffix]		as myselfSuffix					  -- myself suffix
+		, [dpi].[DrvStateCode]		as myselfStateCode	     --	 license state
+		, [dpi].[DrvLicNbr]			as myselfLicenseNbr		 --	 license number
+		, [dpc].[yyyStatusCode]		as xxxStatusCode				-- xxx status code 
+		, [d].[DrvRatability]		as myselfRateability		-- 	rateable indicator
+		, [dpc].[ProductCode]								-- product code
+		, [fpal].[CompanyCode]                    	   
+		, [fpal].[AnnualRnwInd]  as AnnualRenewalIndicator                	  
+		, [fpal].[AgentCode]
+	FROM 
+		[RPT].[vwFactxxxAllLatest] AS [fpal] 
+		INNER JOIN [RPTSS].[vwmyselfPersonalInformation] AS [dpi] ON [dpi].[yyyNbr] = [fpal].[yyyNbr]
+  		INNER JOIN [RPT].[vwmyself] AS [d] ON [dpi].[Drvkey] = [d].[Drvkey]
+	   INNER JOIN RPT.vwDimxxxCharacteristic AS [dpc] ON [dpc].[DimyyyCharId] = [fpal].[DimyyyCharID]
+	   	WHERE [dpc].[StateCode] <> [dpi].[DrvStateCode]
+		AND [d].[DrvRatability] = 'R'
+		AND [dpi].[yyyExprDate] = '2018-06-23 17:58:54.417'   --- may need to convert to date datatype here...
+    
+
+DECLARE @xml_showplan nvarchar(max);
+SET @xml_showplan = (SELECT query_plan
+    FROM sys.dm_exec_query_stats AS qs 
+    CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) AS st
+    CROSS APPLY sys.dm_exec_text_query_plan(qs.plan_handle, DEFAULT, DEFAULT) AS qp
+    WHERE st.text LIKE N'SELECT DISTINCT 
+		  [fpal].yyyExprDate   as xxxExpirationDate  
+		, fpal.yyyNbr	as xxxNumber					   	    -- xxx number
+		, [fpal].[RnwCntr]		as RenewalCounter				   	    -- renewal counter
+		, [fpal].[StrategicAllianceFlg]					-- strategic alliance indicator
+		, [dpc].[StateCode]								-- xxx state
+        , '' '' as BrandCode                     	    -- no longer carried in ops
+		, [dpi].[DrvLastName]	as myselfLastName			   	 	-- myself last name
+		, [dpi].[DrvFirstName]	as myselfFirstName					  -- myself first name
+        , [dpi].[DrvMidName]  as myselfMiddleName
+		, [dpi].[DrvSuffix]		as myselfSuffix					  -- myself suffix
+		, [dpi].[DrvStateCode]		as myselfStateCode	     --	 license state
+		, [dpi].[DrvLicNbr]			as myselfLicenseNbr		 --	 license number
+		, [dpc].[yyyStatusCode]		as xxxStatusCode				-- xxx status code 
+		, [d].[DrvRatability]		as myselfRateability		-- 	rateable indicator
+		, [dpc].[ProductCode]								-- product code
+		, [fpal].[CompanyCode]                    	   
+		, [fpal].[AnnualRnwInd]  as AnnualRenewalIndicator                	  
+		, [fpal].[AgentCode]
+	FROM 
+		[RPT].[vwFactxxxAllLatest] AS [fpal] 
+		INNER JOIN [RPTSS].[vwmyselfPersonalInformation] AS [dpi] ON [dpi].[yyyNbr] = [fpal].[yyyNbr]
+  		INNER JOIN [RPT].[vwmyself] AS [d] ON [dpi].[Drvkey] = [d].[Drvkey]
+	   INNER JOIN RPT.vwDimxxxCharacteristic AS [dpc] ON [dpc].[DimyyyCharId] = [fpal].[DimyyyCharID]
+	   	WHERE [dpc].[StateCode] <> [dpi].[DrvStateCode]
+		AND [d].[DrvRatability] = ''R''
+		AND [dpi].[yyyExprDate] = ''2018-06-23 17:58:54.417''   --- may need to convert to date datatype here...
+%');
+
+EXEC sp_create_plan_guide 
+    @name = N'Guide_for_Dialer_OutOfStatemyselfs',
+    @stmt = N'SELECT DISTINCT 
+		  [fpal].yyyExprDate   as xxxExpirationDate  
+		, fpal.yyyNbr	as xxxNumber					   	    -- xxx number
+		, [fpal].[RnwCntr]		as RenewalCounter				   	    -- renewal counter
+		, [fpal].[StrategicAllianceFlg]					-- strategic alliance indicator
+		, [dpc].[StateCode]								-- xxx state
+        , '' '' as BrandCode                     	    -- no longer carried in ops
+		, [dpi].[DrvLastName]	as myselfLastName			   	 	-- myself last name
+		, [dpi].[DrvFirstName]	as myselfFirstName					  -- myself first name
+        , [dpi].[DrvMidName]  as myselfMiddleName
+		, [dpi].[DrvSuffix]		as myselfSuffix					  -- myself suffix
+		, [dpi].[DrvStateCode]		as myselfStateCode	     --	 license state
+		, [dpi].[DrvLicNbr]			as myselfLicenseNbr		 --	 license number
+		, [dpc].[yyyStatusCode]		as xxxStatusCode				-- xxx status code 
+		, [d].[DrvRatability]		as myselfRateability		-- 	rateable indicator
+		, [dpc].[ProductCode]								-- product code
+		, [fpal].[CompanyCode]                    	   
+		, [fpal].[AnnualRnwInd]  as AnnualRenewalIndicator                	  
+		, [fpal].[AgentCode]
+	FROM 
+		[RPT].[vwFactxxxAllLatest] AS [fpal] 
+		INNER JOIN [RPTSS].[vwmyselfPersonalInformation] AS [dpi] ON [dpi].[yyyNbr] = [fpal].[yyyNbr]
+  		INNER JOIN [RPT].[vwmyself] AS [d] ON [dpi].[Drvkey] = [d].[Drvkey]
+	   INNER JOIN RPT.vwDimxxxCharacteristic AS [dpc] ON [dpc].[DimyyyCharId] = [fpal].[DimyyyCharID]
+	   	WHERE [dpc].[StateCode] <> [dpi].[DrvStateCode]
+		AND [d].[DrvRatability] = ''R''
+		AND [dpi].[yyyExprDate] = @xxxExpirationDate   --- may need to convert to date datatype here...
+',
+    @type = N'OBJECT',
+    @module_or_batch = N'Dialer.GetOutOfStatemyselfs',
+    @params = NULL,
+    @hints = @xml_showplan;
+GO

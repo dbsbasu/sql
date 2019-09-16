@@ -1,0 +1,142 @@
+--create a database and put into full recovery, create 2 identical tables and add 10000 rows into one table, 
+--take a full database backup
+--take a TLOG backup 
+--bcp OUT all the records from the table into a text file
+--bcp IN 1000 rows from the text file into the second table, which is empty
+--record tran log size
+--take a TLOG backup 
+--record tran log size
+--change recovery model to bulk-logged
+--delete records from the second table
+--take a TLOG backup 
+--bcp IN next 1000 rows from the text file into the second table, which is now again empty
+--record tran log size
+--take a TLOG backup 
+--record tran log size
+--bcp IN next 1000 rows from the text file into the second table
+--record tran log size
+--take a TLOG backup 
+
+
+--bulk insert data
+use [db_minimal_logging];
+insert into dbo.testData2 with (TABLOCK) (id, fillData, recAddDatetime)
+select id, fillData, recAddDatetime  from dbo.testData where id between 1 and 100 order by id asc
+
+--take a TLOG backup
+backup log [db_minimal_logging] to disk = N'N:\Mounts\Backups\db_minimal_logging_log_full_1.trn' 
+backup log [db_minimal_logging] to disk = N'N:\Mounts\Backups\db_minimal_logging_log_bulk_logged_1.trn' 
+backup log [db_minimal_logging] to disk = N'N:\Mounts\Backups\db_minimal_logging_log_bulk_logged_3.trn' 
+backup log [db_minimal_logging] to disk = N'N:\Mounts\Backups\db_minimal_logging_log_discard_01.trn' 
+
+--change recovery models
+alter database [db_minimal_logging] set recovery full with no_wait;
+alter database [db_minimal_logging] set recovery bulk_logged with no_wait;
+
+--select / delete data operations
+--select * from dbo.testData order by id asc
+--select * from [db_minimal_logging].[dbo].[testData2]
+--delete from db_minimal_logging.dbo.testData2
+
+use [db_minimal_logging];
+--create a table and clustered index
+create table dbo.testData (
+id int not null
+,fillData varchar(800) null
+,recAddDatetime datetime2 not null constraint DF_recAddDatetime default sysdatetime()
+) on [primary];
+create unique clustered index uq_testdata on dbo.testdata (id asc) with (pad_index = on, fillfactor = 100) on [primary];
+
+use [db_minimal_logging];
+--create an identical second table and clustered index
+create table dbo.testData2 (
+id int not null
+,fillData varchar(800) null
+,recAddDatetime datetime2 
+) on [primary];
+create clustered index cx_testdata2 on dbo.testdata2 (id asc) with (pad_index = on, fillfactor = 100) on [primary];
+
+--add data into table
+set nocount on;
+declare @id int = 0, @iterate int = 0, @addrows int;
+set @addrows = 10000 --> set number of inserts
+select @id = 1 + coalesce(max(id),0) from dbo.testData;
+----> uncomment below to override starting value 
+--set @id = 0 
+set @iterate = @id + @addrows - 1;
+select 'next id starts at: ' + cast (@id as varchar(10)) 
+          + ' / ends at: '  + cast (@iterate as varchar(10)) 
+		  + ' / adding ' + cast(@addrows as varchar(10)) + ' rows ; ';
+
+while @id <= @iterate
+begin
+---->if statement will insert id values that are NOT divisible by 10
+--if @id % 10 != 0
+	insert into dbo.testData (id, fillData) values (@id, replicate('a',781));
+	set @id = @id + 1;
+end;
+checkpoint;
+
+--take a full backup
+backup database [db_minimal_logging] to disk = N'N:\Mounts\Backups\db_minimal_logging_FULL.bak' with stats = 10
+
+--look at the log backup file
+select *
+from fn_dump_dblog (
+        NULL, NULL, N'DISK', 1, N'N:\Mounts\Backups\db_minimal_logging_log_full_1.trn',
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
+
+select *
+from fn_dump_dblog (
+        NULL, NULL, N'DISK', 1, N'N:\Mounts\Backups\db_minimal_logging_log_bulk_logged_1.trn',
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
+
+select *
+from fn_dump_dblog (
+        NULL, NULL, N'DISK', 1, N'N:\Mounts\Backups\db_minimal_logging_log_bulk_logged_2.trn',
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
+
+
+restore headeronly from disk = N'N:\Mounts\Backups\db_minimal_logging_log_bulk_logged_1.trn'
+
+restore headeronly from disk = N'N:\Mounts\Backups\db_minimal_logging_log_bulk_logged_3.trn'
+
+
+
+
+/*
+--bcp OUT
+exec xp_cmdshell 'bcp "select id, fillData, recAddDatetime from db_minimal_logging.dbo.testData where id <= 10000 order by id asc" queryout "N:\Mounts\Backups\testData_out.txt" -c -b 1000 -T'
+
+--bcp IN
+exec xp_cmdshell 'bcp "db_minimal_logging.dbo.testData2" in "N:\Mounts\Backups\testData_out.txt" -c -F 1 -L 2000 -b 2000 -T -h TABLOCK'
+*/
+
+--verify log space used (--record tran log size)
+dbcc sqlperf(logspace)
+
+

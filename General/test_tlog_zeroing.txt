@@ -1,0 +1,101 @@
+--starting trace flags
+select SYSDATETIME(), '  starting trace flags';
+DBCC TRACEON (3004, 3605);
+GO
+
+--creating database
+select SYSDATETIME(), '  creating database';
+CREATE DATABASE [TLogDB1]
+ CONTAINMENT = NONE
+ ON  PRIMARY 
+( NAME = N'TLogDB1', FILENAME = N'N:\Mounts\Data\TLogDB1.mdf' , SIZE = 10240KB , FILEGROWTH = 0)
+ LOG ON 
+( NAME = N'TLogDB1_log', FILENAME = N'N:\Mounts\Logs\TLogDB1_log.ldf' , SIZE = 10240KB , FILEGROWTH = 0)
+GO
+alter authorization on database::TLogDB1 to sa
+GO
+USE [TLogDB1]
+GO
+ALTER DATABASE [TLogDB1] SET RECOVERY SIMPLE 
+GO
+
+
+--creating table
+select SYSDATETIME(), '  creating table';
+CREATE TABLE [dbo].[TLogTest](
+	[id] [int] IDENTITY(1,1) NOT NULL,
+	[comments] [varchar](80) COLLATE SQL_Latin1_General_CP1_CI_AS NULL,
+	recAddTimestamp datetime2 not null constraint df_recAddTimestamp default sysdatetime(),
+ CONSTRAINT [PK_t1] PRIMARY KEY CLUSTERED 
+(
+	[id] ASC
+)WITH (PAD_INDEX = ON, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+SET ANSI_PADDING OFF
+GO
+
+--adding data into table
+select SYSDATETIME(), '  adding data into table';
+begin tran addRows;
+set nocount on;
+declare @addRec int = 38900;
+declare @iterate int = 1;
+while @iterate <= @addRec
+begin
+	INSERT INTO [dbo].[TLogTest] ([comments])  VALUES ('what log space freed up means')
+	if @iterate % 10000 = 0
+	 begin
+		print '# of rows inserted ' + cast (@iterate as varchar(20));
+		checkpoint;
+	 end
+	set @iterate = @iterate + 1;
+end
+commit tran addRows;
+--selecting row count from table
+select SYSDATETIME(), '  selecting row count from table';
+select count(*) as st_rec_count from dbo.TLogTest;
+
+--------------------
+
+--check log space before checkpoint
+select SYSDATETIME(), '  check log space before checkpoint';
+dbcc sqlperf (logspace)
+
+--issuing a checkpoint
+select SYSDATETIME(), '  issuing a checkpoint';
+checkpoint;
+go
+
+--check log space after checkpoint
+select SYSDATETIME(), '  check log space after checkpoint';
+dbcc sqlperf (logspace)
+
+
+--making sure database is multi-user
+select SYSDATETIME(), '  making sure database is multi-user';
+use [master]
+go
+ALTER DATABASE [TLogDB1] SET  MULTI_USER
+GO
+
+--manually growing data and tlog files 
+select SYSDATETIME(), '  manually growing data and tlog files';
+ALTER DATABASE [TLogDB1] MODIFY FILE ( NAME = N'TLogDB1_log', SIZE = 10880KB )
+GO
+
+--set database single_user and drop 
+select SYSDATETIME(), '  set database single_user and drop';
+use [master]
+go
+ALTER DATABASE [TLogDB1] SET  SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+DROP DATABASE [TLogDB1]
+GO
+
+--stopping trace flags
+select SYSDATETIME(), '  stopping trace flags';
+DBCC TRACEOFF (3004, 3605);
+GO
+
+exec master..xp_readerrorlog 0, 1 , null, null, null, null, 'desc'

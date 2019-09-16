@@ -1,0 +1,38 @@
+IF  EXISTS (SELECT * FROM sys.types st JOIN sys.schemas ss ON st.schema_id = ss.schema_id WHERE st.name = N'TestType' AND ss.name = N'dbo')
+DROP TYPE [dbo].[TestType];
+go
+
+IF NOT EXISTS (SELECT * FROM sys.types st JOIN sys.schemas ss ON st.schema_id = ss.schema_id WHERE st.name = N'TestType' AND ss.name = N'dbo')
+CREATE TYPE [dbo].[TestType] AS TABLE(
+	[requestPartId]  AS (ABS([requestId]%(10))),
+	[requestId] [INT] NOT NULL,
+	[ExecutionId] [INT] NOT NULL DEFAULT ((1)),
+	PRIMARY KEY CLUSTERED ([requestId] ASC, [ExecutionId] ASC));
+go
+DECLARE @TestType1 dbo.TestType; 
+INSERT INTO @TestType1
+        ( requestId, ExecutionId)
+VALUES  (1112 , 1),
+		(61114 , 1),
+		(1115 , 1);
+SELECT TestType1.requestPartId, TestType1.requestId, TestType1.ExecutionId FROM @TestType1 TestType1
+
+DECLARE @TestType2 dbo.TestType; 
+INSERT INTO @TestType2
+        ( requestId, ExecutionId)
+VALUES  (61112 , 1),
+		(61114 , 1),
+		(61115 , 1);
+SELECT TestType2.requestPartId, TestType2.requestId, TestType2.ExecutionId FROM @TestType2 TestType2
+
+--give me what I don't already have
+SELECT TestType1.requestPartId, TestType1.requestId, TestType1.ExecutionId FROM @TestType1 TestType1
+EXCEPT
+SELECT TestType2.requestPartId, TestType2.requestId, TestType2.ExecutionId FROM @TestType2 TestType2
+
+--give me what I already have
+SELECT TestType1.requestPartId, TestType1.requestId, TestType1.ExecutionId FROM @TestType1 TestType1
+INTERSECT
+SELECT TestType2.requestPartId, TestType2.requestId, TestType2.ExecutionId FROM @TestType2 TestType2
+
+

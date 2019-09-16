@@ -1,0 +1,32 @@
+-- Table Size
+select db_name(dmv_ixps.database_id) as 'DatabaseName'
+	,sc.name as SchemaName, object_name(dmv_ixps.object_id) as TableName
+	,convert(decimal(12,3),round(dmv_ixps.page_count*8.0/1024.0,3)) as Table_Size_MB 
+	,pt.rows as RecordCount
+	, dmv_ixps.alloc_unit_type_desc
+	,dmv_ixps.avg_fragmentation_in_percent, dmv_ixps.fragment_count, dmv_ixps.avg_fragment_size_in_pages
+	,dmv_ixps.avg_page_space_used_in_percent, dmv_ixps.ghost_record_count,dmv_ixps. version_ghost_record_count 
+	,dmv_ixps.min_record_size_in_bytes, dmv_ixps.max_record_size_in_bytes, dmv_ixps.avg_record_size_in_bytes, dmv_ixps.forwarded_record_count
+	,dmv_ixps.compressed_page_count, dmv_ixps.partition_number 
+from sys.dm_db_index_physical_stats ( null, null, null, null, null) dmv_ixps
+INNER JOIN sys.partitions pt ON pt.object_id = dmv_ixps.object_id and dmv_ixps.index_id = pt.index_id
+inner join sys.tables tb on tb.object_id = dmv_ixps.object_id
+inner join sys.schemas sc on sc.schema_id = tb.schema_id
+and dmv_ixps.database_id = DB_ID() and dmv_ixps.index_type_desc in ('CLUSTERED INDEX','HEAP')
+
+-- Index Size
+select db_name(dmv_ixps.database_id) as 'DatabaseName'
+	,sc.name as SchemaName, object_name(dmv_ixps.object_id) as 'Object'	
+	, ix.index_id,ix.name as 'IX_Name', dmv_ixps.index_type_desc
+	,convert(decimal(12,3),round(dmv_ixps.page_count*8.0/1024.0,3)) as Size_MB 
+	, dmv_ixps.alloc_unit_type_desc
+	,dmv_ixps.avg_fragmentation_in_percent, dmv_ixps.fragment_count, dmv_ixps.avg_fragment_size_in_pages
+	,dmv_ixps.avg_page_space_used_in_percent, dmv_ixps.ghost_record_count,dmv_ixps. version_ghost_record_count 
+	,dmv_ixps.min_record_size_in_bytes, dmv_ixps.max_record_size_in_bytes, dmv_ixps.avg_record_size_in_bytes, dmv_ixps.forwarded_record_count
+	,dmv_ixps.compressed_page_count, dmv_ixps.partition_number 
+from sys.dm_db_index_physical_stats ( null, null, null, null, null) dmv_ixps
+inner join sys.tables tb on tb.object_id = dmv_ixps.object_id
+inner join sys.schemas sc on sc.schema_id = tb.schema_id
+join sys.indexes ix with (nolock) on ix.[object_id] = dmv_ixps.[object_id] 	and ix.[index_id] = dmv_ixps.[index_id]
+where dmv_ixps.database_id = DB_ID() 
+

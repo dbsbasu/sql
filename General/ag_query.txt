@@ -1,0 +1,56 @@
+SELECT
+AGS.name AS AGGroupName, AR.replica_server_name AS InstanceName, HARS.role_desc, Db_name(DRS.database_id) AS DBName,
+DRS.database_id, DRS.is_local, DRS.database_state_desc, AR.availability_mode_desc AS SyncMode, 
+DRS.synchronization_state_desc AS SyncState, DRS.last_hardened_lsn, DRS.end_of_log_lsn, DRS.last_redone_lsn,
+DRS.last_hardened_time, DRS.last_redone_time, DRS.log_send_queue_size, DRS.redo_queue_size 
+FROM sys.dm_hadr_database_replica_states DRS
+LEFT JOIN sys.availability_replicas AR ON DRS.replica_id = AR.replica_id
+LEFT JOIN sys.availability_groups AGS  ON AR.group_id = AGS.group_id
+LEFT JOIN sys.dm_hadr_availability_replica_states HARS ON AR.group_id = HARS.group_id AND AR.replica_id = HARS.replica_id
+--WHERE DRS.database_state_desc = 'ONLINE'
+ORDER BY AGS.name, AR.replica_server_name, Db_name(DRS.database_id)
+
+--Monitoring the Always On Availability Groups Feature on a Server Instance
+select SERVERPROPERTY('IsHadrEnabled') as IsHadrEnabled, SERVERPROPERTY('HadrManagerStatus') as HadrManagerStatus
+
+--Monitoring Availability Groups on the WSFC Cluster
+select * from sys.dm_hadr_cluster
+select * from sys.dm_hadr_cluster_members
+select * from sys.dm_hadr_cluster_networks
+select * from sys.dm_hadr_instance_node_map
+select * from sys.dm_hadr_name_id_map
+
+--Monitoring Availability Groups
+select * from sys.availability_groups
+select * from sys.availability_groups_cluster
+select * from sys.dm_hadr_availability_group_states
+
+--Monitoring Availability Replicas
+select * from sys.availability_replicas
+select * from sys.availability_read_only_routing_lists
+select * from sys.dm_hadr_availability_replica_cluster_nodes
+select * from sys.dm_hadr_availability_replica_cluster_states
+select * from sys.dm_hadr_availability_replica_states
+select sys.fn_hadr_backup_is_preferred_replica('my_database_name') as is_preferred_backup_replica
+
+--Monitoring Availability Databases
+select * from sys.availability_databases_cluster
+select * from sys.databases
+select * from sys.dm_hadr_auto_page_repair
+select * from sys.dm_hadr_database_replica_states
+select * from sys.dm_hadr_database_replica_cluster_states
+
+--Monitoring Availability Group Listeners
+select * from sys.availability_group_listener_ip_addresses
+select * from sys.availability_group_listeners
+select * from sys.dm_tcp_listener_states
+
+--redo que -- how far behind?
+SELECT arcs.replica_server_name, d.name, d.log_reuse_wait_desc, drs.log_send_queue_size,drs.redo_queue_size
+FROM master.sys.databases d
+INNER JOIN master.sys.dm_hadr_database_replica_states drs
+ON d.database_id=drs.database_id
+INNER JOIN master.sys.dm_hadr_availability_replica_cluster_states arcs
+ON drs.replica_id=arcs.replica_id
+ORDER BY name ASC
+

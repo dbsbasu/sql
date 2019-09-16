@@ -1,0 +1,22 @@
+-- proof table variable cannot rollback
+declare @table_variable table (id int, remarks varchar(80));
+drop table if exists #temp_table;
+create table #temp_table (id int, remarks varchar(80));
+
+begin tran
+    insert into @table_variable (id, remarks) values (1, 'ideally I should persist due to commit');
+    insert into #temp_table (id, remarks) values (1, 'ideally I should persist due to commit');
+commit tran 
+
+begin tran
+    delete from #temp_table where id = 1;
+    delete from @table_variable where id = 1;
+    insert into @table_variable (id, remarks) values (2, 'ideally I should NOT persist due to rollback');
+    insert into #temp_table (id, remarks) values (2, 'ideally I should NOT persist due to rollback');
+rollback tran
+
+select '@table_variable', * from @table_variable;
+select '#temp_table', * from #temp_table;
+
+--result is self explanatory; after the rollback, #temp_table has id 1, but @table_variable has id 2 since the later could not rollback the delete of id = 1 as well could not remove the inserted row with id = 2
+ 

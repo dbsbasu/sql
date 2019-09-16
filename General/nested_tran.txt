@@ -1,0 +1,78 @@
+SET NOCOUNT ON;
+DROP TABLE IF EXISTS dbo.nested_t1;
+
+CREATE TABLE dbo.nested_t1 (
+ nested_t1_id TINYINT IDENTITY(1,1) NOT NULL
+,remarks VARCHAR(80) NULL
+,CONSTRAINT pk_nested_t1 PRIMARY KEY CLUSTERED (nested_t1_id ASC));
+
+-- commit tran_2, rollback tran_1 and expect to still see tran_2
+
+BEGIN TRAN tran_1
+    INSERT INTO dbo.nested_t1
+    (
+        remarks
+    )
+    VALUES
+    ('row added from tran_1'
+        );
+
+    SELECT @@trancount AS tran_1_count;
+    SELECT * FROM dbo.nested_t1;
+
+    BEGIN TRAN tran_2
+        INSERT INTO dbo.nested_t1
+        (
+            remarks
+        )
+        VALUES
+        ('row added from tran_2'
+            );
+
+    COMMIT TRAN tran_2;
+
+    SELECT @@trancount AS tran_2_count;
+    SELECT * FROM dbo.nested_t1;
+
+ROLLBACK TRAN tran_1;
+
+SELECT @@trancount AS tran_0_count;
+SELECT * FROM dbo.nested_t1;
+
+
+-- rollback tran_2 (not even possible) and expect to still see tran_1
+
+SET NOCOUNT ON;
+DROP TABLE IF EXISTS dbo.nested_t1;
+
+CREATE TABLE dbo.nested_t1 (
+ nested_t1_id TINYINT IDENTITY(1,1) NOT NULL
+,remarks VARCHAR(80) NULL
+,CONSTRAINT pk_nested_t1 PRIMARY KEY CLUSTERED (nested_t1_id ASC));
+
+BEGIN TRAN tran_1
+    INSERT INTO dbo.nested_t1
+    (
+        remarks
+    )
+    VALUES
+    ('row added from tran_1'
+        );
+
+    SELECT @@trancount AS tran_1_count;
+    SELECT * FROM dbo.nested_t1;
+
+    BEGIN TRAN tran_2
+        INSERT INTO dbo.nested_t1
+        (
+            remarks
+        )
+        VALUES
+        ('row added from tran_2'
+            );
+
+    ROLLBACK TRAN-- tran_2;
+
+    SELECT @@trancount AS tran_2_count;
+    SELECT * FROM dbo.nested_t1;
+

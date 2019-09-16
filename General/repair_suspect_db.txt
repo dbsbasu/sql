@@ -1,0 +1,20 @@
+--To get the exact reason of a database going into suspect mode can be found using the following query
+
+DBCC CHECKDB ('myDB1') WITH NO_INFOMSGS, ALL_ERRORMSGS
+
+--Output of the above query will give the errors in the database.
+
+--To repair the database, run the following queries in Query Analyzer,
+
+EXEC sp_resetstatus 'myDB1'; 
+
+ALTER DATABASE myDB1 SET EMERGENCY 
+
+DBCC checkdb('myDB1') 
+
+ALTER DATABASE myDB1 SET SINGLE_USER WITH ROLLBACK IMMEDIATE 
+
+DBCC CheckDB ('myDB1', REPAIR_ALLOW_DATA_LOSS) 
+
+ALTER DATABASE myDB1 SET MULTI_USER
+

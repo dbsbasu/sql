@@ -1,0 +1,22 @@
+--objects that have been created as 'EXECUTE AS OWNER' but not performing any cross database queries
+SELECT OBJECT_SCHEMA_NAME(sm.object_id)+'.'+OBJECT_NAME(sm.object_id) as ObjecName
+FROM sys.sql_modules sm 
+inner join sys.objects ob on ob.object_id = sm.object_id
+WHERE sm.execute_as_principal_id = -2
+except
+SELECT distinct OBJECT_SCHEMA_NAME(sed.referencing_id)+'.'+OBJECT_NAME(sed.referencing_id) AS ObjectName
+FROM sys.sql_expression_dependencies sed
+WHERE sed.referenced_database_name IS NOT null
+
+
+--objects that are performing cross-database query but not created as 'EXECUTE AS OWNER'
+SELECT distinct OBJECT_SCHEMA_NAME(sed.referencing_id)+'.'+OBJECT_NAME(sed.referencing_id) AS ObjectName
+FROM sys.sql_expression_dependencies sed
+WHERE sed.referenced_database_name IS NOT null
+except
+select OBJECT_SCHEMA_NAME(sm.object_id)+'.'+OBJECT_NAME(sm.object_id) as ObjecName
+FROM sys.sql_modules sm 
+inner join sys.objects ob on ob.object_id = sm.object_id
+WHERE sm.execute_as_principal_id = -2
+
+
