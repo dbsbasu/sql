@@ -1,0 +1,233 @@
+----database permissions
+declare @databaseNameINPUT varchar(200), @Principal_Type_Desc varchar(200), @Principal_Name varchar(200), @Target_Class_Desc varchar(200), @Target_Object varchar(200);
+
+set @databaseNameINPUT = 'msdb';
+--set @Principal_Type_Desc = 'sql_user' 
+--set @Principal_Name = 'special'
+--set @Target_Class_Desc = 'Object :  USER_TABLE' 
+--set @Target_Object = 'db_owner'
+
+--NOTE on desired resultset: (1) uncomment1 for non-pivot and scripting -OR- (2) uncomment2 for pivot
+
+SET NOCOUNT ON;
+if object_id('tempdb..#SrcDB_Principals') is not null drop table #SrcDB_Principals;
+create table #SrcDB_Principals 
+(
+  id1 int identity(1,1)
+ ,DBName         VARCHAR(200)
+ ,Grantor         VARCHAR(200)
+ ,Grantor_Type_Desc		VARCHAR(200)
+ ,Principal_Type_Desc		VARCHAR(200)
+ ,Principal_Name		VARCHAR(200)
+ ,Server_Login		VARCHAR(200)
+ ,Target_Class_Desc		VARCHAR(200)
+ ,Target_Object		VARCHAR(200)
+ ,create_date datetime
+ ,modify_date datetime
+ ,Securables		VARCHAR(200)
+ ,Grant_State		VARCHAR(200)
+ ,filter1		bit constraint df_filter1 default (0)
+ ,role_Xref		tinyint constraint df_role_Xref default (0)
+);
+create unique clustered index UQ_SrcDB_Principals on #SrcDB_Principals (id1 asc);
+create nonclustered index NC_SrcDB_Principals on #SrcDB_Principals (filter1 asc);
+declare @db1name sysname;
+declare @SQLQuery nvarchar(4000);
+declare user_dbs cursor read_only for 
+select d1.name from [master].sys.databases d1
+where d1.name not in ('ResourceDb') 
+and d1.name <> 'AdventureWorksDW2012'
+and ((ISNULL(@databaseNameINPUT, 'null') = 'null') or
+     (ISNULL(@databaseNameINPUT, 'null') <> 'null' and d1.name = @databaseNameINPUT))
+and d1.[state] = 0 and d1.user_access = 0 
+order by d1.name asc;
+
+open user_dbs;
+fetch next from user_dbs INTO @db1name;
+while (@@fetch_status = 0)
+begin
+set @SQLQuery = '';
+
+set @SQLQuery = '
+insert into #SrcDB_Principals
+(DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object, create_date, modify_date, Securables, Grant_State, role_Xref)
+select '''+@db1name+''' as DBName,
+princi3.name as Grantor, princi3.type_desc as Grantor_Type_Desc,
+princi.type_desc as Principal_Type_Desc,
+princi.name as Principal_Name, 
+coalesce (case when princi.[type] in (''G'',''S'',''U'') then srv_princi.name else ''-n/a-'' end, ''*** orphan ***'') as Server_Login,
+case when perms.class = 1 then ''Object :  '' + obj.type_desc 
+	 else perms.class_desc 
+end as Target_Class_Desc, 
+case when perms.class = 1 then sc1.name+''.''+obj.name 
+     when perms.class = 3 then sc3.name
+     when perms.class = 0 then '''+@db1name+'''
+	 when perms.class = 4 then princi4.name 
+	 when perms.class = 6 then tp6.name 
+	 else ''need to derive for class '' + cast (perms.class as varchar(20))
+end as Target_Object,
+princi.create_date,
+princi.modify_date,
+perms.[permission_name] as Securables,
+perms.state_desc as Grant_State,
+1
+from            '+quotename(@db1name)+'.sys.database_permissions perms
+inner join      '+quotename(@db1name)+'.sys.database_principals princi on princi.principal_id  = perms.grantee_principal_id and princi.name <> ''dbo''
+inner join      '+quotename(@db1name)+'.sys.database_principals princi3 on princi3.principal_id  = perms.grantor_principal_id
+left outer join '+quotename(@db1name)+'.sys.all_objects as obj on obj.[object_id] = perms.major_id and perms.class = 1
+left outer join '+quotename(@db1name)+'.sys.schemas sc1 on sc1.schema_id = obj.schema_id and perms.class = 1
+left outer join '+quotename(@db1name)+'.sys.schemas sc3 on sc3.schema_id = perms.major_id and perms.class = 3
+left outer join '+quotename(@db1name)+'.sys.database_principals princi4 on princi4.principal_id = perms.major_id and perms.class = 4
+left outer join '+quotename(@db1name)+'.sys.types tp6 on tp6.is_user_defined = 1 and tp6.user_type_id = perms.major_id and perms.class = 6
+left outer join [master].sys.server_principals srv_princi on srv_princi.[sid] = princi.[sid]  
+where not (perms.[permission_name] = ''connect'' and perms.state_desc = ''grant'')
+and princi.name not in (''dbo'',''guest'',''INFORMATION_SCHEMA'',''sys'',''public'')
+UNION
+select '''+@db1name+'''  as DBName,
+princi3.name as Grantor, princi3.type_desc as Grantor_Type_Desc,
+princi.type_desc as Principal_Type_Desc,
+princi.name as Principal_Name, 
+coalesce (case when princi.[type] in (''G'',''S'',''U'') then srv_princi.name else ''-n/a-'' end, ''*** orphan ***'') as Server_Login,
+princi2.type_desc as Target_Class_Desc,  
+princi2.name as Target_Object,
+princi.create_date,
+princi.modify_date,
+''1_Role_Member_XRef'' as Securables,
+''Role_Member_XRef_ONLY'' as Grant_State,
+2
+FROM       '+quotename(@db1name)+'.sys.database_permissions perms
+inner join '+quotename(@db1name)+'.sys.database_principals princi on princi.principal_id  = perms.grantee_principal_id and princi.name <> ''dbo''
+inner join '+quotename(@db1name)+'.sys.database_principals princi3 on princi3.principal_id  = perms.grantor_principal_id
+inner join '+quotename(@db1name)+'.sys.database_role_members roleMembers on roleMembers.member_principal_id = princi.principal_id 
+inner join '+quotename(@db1name)+'.sys.database_principals princi2 on  princi2.principal_id = roleMembers.role_principal_id 
+left outer join [master].sys.server_principals srv_princi on srv_princi.[sid] = princi.[sid] 
+where princi.name not in (''dbo'',''guest'',''INFORMATION_SCHEMA'',''sys'',''public'')
+';
+
+--print @SQLQuery;
+exec sp_executesql @SQLQuery;
+set @SQLQuery = '';
+
+fetch next from user_dbs into @db1name;
+end;
+close user_dbs;
+deallocate user_dbs;
+
+/* CREATE RESULTSET */
+insert into #SrcDB_Principals
+(DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object, create_date, modify_date, Securables, Grant_State, filter1, role_Xref)
+select DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object, create_date, modify_date, Securables, Grant_State, 1, role_Xref 
+from #SrcDB_Principals spr1
+where 
+    ((ISNULL(@Principal_Type_Desc, 'null') = 'null') or
+     (ISNULL(@Principal_Type_Desc, 'null') <> 'null' and spr1.Principal_Type_Desc = @Principal_Type_Desc))
+and ((ISNULL(@Principal_Name, 'null') = 'null') or
+     (ISNULL(@Principal_Name, 'null') <> 'null' and spr1.Principal_Name = @Principal_Name))
+and ((ISNULL(@Target_Class_Desc, 'null') = 'null') or
+     (ISNULL(@Target_Class_Desc, 'null') <> 'null' and spr1.Target_Class_Desc = @Target_Class_Desc))
+and ((ISNULL(@Target_Object, 'null') = 'null') or
+     (ISNULL(@Target_Object, 'null') <> 'null' and spr1.Target_Object = @Target_Object))
+and not (
+DBName = 'msdb' AND  
+((Principal_Type_Desc = 'DATABASE_ROLE' 
+and Principal_Name in
+(
+ 'TargetServersRole'
+,'SQLAgentUserRole'
+,'SQLAgentReaderRole'
+,'SQLAgentOperatorRole'
+,'DatabaseMailUserRole'
+,'db_ssisadmin'
+,'db_ssisltduser'
+,'db_ssisoperator'
+,'dc_operator'
+,'dc_admin'
+,'dc_proxy'
+,'dbm_monitor'
+,'PolicyAdministratorRole'
+,'RSExecRole'
+,'ServerGroupAdministratorRole'
+,'ServerGroupReaderRole'
+,'UtilityCMRReader'
+,'UtilityIMRWriter'
+,'UtilityIMRReader'
+))
+OR
+(Principal_Type_Desc = 'SQL_USER'
+and (Principal_Name = 'MS_DataCollectorInternalUser' or Principal_Name like '##%')
+)))
+order by DBName, role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object
+
+if exists (select 1 from #SrcDB_Principals spr1 where spr1.filter1 = 1)
+begin -- with existenace check 
+
+/* NON-PIVOT - SCRIPTING PERMISSIONS DISPLAY STARTS */
+/* --PART A - SCRIPTING / PIVOT: comment out if you need non-pivot resultset and script-out permissions
+select DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object, Securables, Grant_State, create_date, modify_date,
+case when spr1.Principal_Type_Desc in ('SQL_USER','WINDOWS_GROUP','WINDOWS_USER') then
+'use [master]'+ char(10) + 'GO'+ char(10) + 'if not exists (select 1 from sys.server_principals where name = N'''+spr1.Server_Login+''')'+ char(10)+'   CREATE LOGIN '+quotename(spr1.Server_Login)+' FROM WINDOWS WITH DEFAULT_DATABASE=[master];'+ char(10) + 'GO'+ char(10) else '--n/a--' end as Create_Login_Script,
+case when spr1.Principal_Type_Desc in ('SQL_USER','WINDOWS_GROUP','WINDOWS_USER') then
+'use '+ quotename(spr1.DBName) + char(10) + 'GO'+ char(10) + 'if not exists (select 1 from sys.database_principals where name = N'''+spr1.Principal_Name+''')'+ char(10) + '   CREATE USER '+quotename(spr1.Principal_Name)+' FOR LOGIN '+quotename(spr1.Server_Login)+';'+ char(10) + 'GO' +  char(10)  + 
+case when spr1.Principal_Type_Desc = 'SQL_USER' then 'EXEC sp_change_users_login ''Update_One'', '''+spr1.Principal_Name+''', '''+spr1.Server_Login+''';' + char(10) + 'GO' + char(10) else '' end else '--n/a--' end as Create_User_Script
+,case spr1.Securables
+when  '1_Role_Member_XRef'
+then 'ALTER ROLE ' + quotename(spr1.Target_Object) + ' ADD MEMBER ' + quotename(spr1.Principal_Name) +';'
+else
+	case spr1.Target_Class_Desc
+	when 'DATABASE' 
+	then spr1.Grant_State + ' ' + spr1.Securables + ' on database::' + quotename(spr1.Target_Object) + ' to ' + quotename(spr1.Principal_Name) +';'
+	when 'SCHEMA' 
+	then spr1.Grant_State + ' ' + spr1.Securables + ' on schema::' + quotename(spr1.Target_Object) + ' to ' + quotename(spr1.Principal_Name) +';'
+	else spr1.Grant_State + ' ' + spr1.Securables + ' on ' + spr1.Target_Object + ' to ' + quotename(spr1.Principal_Name) +';'
+	end
+end as script_permissions
+from #SrcDB_Principals spr1
+where spr1.filter1 = 1
+order by DBName, role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object;
+*/ --PART A - SCRIPTING / PIVOT: comment out if you need non-pivot resultset and script-out permissions
+/* NON-PIVOT - SCRIPTING PERMISSIONS DISPLAY ENDS */
+
+/* PIVOT DISPLAY STARTS */
+--/* --PART B - PIVOT: comment out if you need pivot resultset
+if object_id('tempdb..#colT') is not null drop table #colT;
+create table #colT (Target_Class_Desc1  varchar(200), colName varchar(200));
+
+insert into #colT
+select distinct Target_Class_Desc, Securables
+from #SrcDB_Principals spr1
+where spr1.filter1 = 1
+order by Target_Class_Desc desc, Securables;
+
+DECLARE @colsIsNull VARCHAR(4000);
+set @colsIsNull = '';
+SELECT  @colsIsNull = STUFF((SELECT DISTINCT TOP 100 PERCENT ', isnull([' + t1.colName +'],'''') AS ['+t1.colName+']'
+FROM #colT AS t1 
+FOR XML PATH('')), 1, 2, '') + '';
+
+DECLARE @cols VARCHAR(4000);
+set @cols = '';
+SELECT  @cols = STUFF((SELECT DISTINCT TOP 100 PERCENT ', [' + t1.colName +']'
+FROM #colT AS t1
+FOR XML PATH('')), 1, 2, '') + '';
+
+set @SQLQuery = '';
+set @SQLQuery = N'SELECT DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object, create_date, modify_date,  '+@colsIsNull +'
+FROM (SELECT DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object,  create_date, modify_date, ColName, Grant_State, role_Xref
+FROM  #SrcDB_Principals  spr1
+inner join #colT  a1 on a1.colName = spr1.Securables 
+where spr1.filter1 = 1) p
+'+ ' PIVOT ' + '(MAX([Grant_State]) FOR ColName IN ( '+ @cols +' ) ) AS pvt
+order by DBName,  role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object
+;'; --do NOT change the order
+
+exec sp_executesql @SQLQuery;
+set @SQLQuery = '';
+if object_id('tempdb..#colT') is not null drop table #colT;
+--*/ --PART B - PIVOT: comment out if you need pivot resultset
+/* PIVOT DISPLAY ENDS */
+end -- with existenace check 
+else print 'no such permissions'
+
+if object_id('tempdb..#SrcDB_Principals') is not null drop table #SrcDB_Principals;
+go
+

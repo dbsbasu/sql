@@ -1,0 +1,39 @@
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##inviv_obj_access'
+AND type in (N'U'))
+DROP TABLE ##inviv_obj_access;
+GO
+create table ##inviv_obj_access 
+(
+DBName	varchar(320),
+Grantee		varchar(80) not null default '',
+GranteeType		varchar(80) not null default '',
+SchemaName		varchar(80) not null default '',
+ObjectName		varchar(80) not null default '',
+ObjectType		varchar(80) not null default '',
+Permission		varchar(80) not null default '',
+PermissionState	varchar(80) not null default '',
+);
+
+EXEC sp_msForEachDB ' 
+if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'',''[ResourceDb]'',''[dbaUtils]'') return
+use [?] 
+
+insert into ##inviv_obj_access
+SELECT db_name() as DBName, grantee_principal.name as [Grantee], grantee_principal.type_desc as [GranteeType], schema_name(obj.schema_id) AS [SchemaName], obj.name AS [ObjectName], obj.type_desc as [ObjectType], prmssn.permission_name as [Permission], prmssn.state_desc as [PermissionState]
+FROM  sys.database_permissions AS prmssn
+INNER JOIN sys.database_principals AS grantee_principal 
+ON grantee_principal.principal_id = prmssn.grantee_principal_id
+INNER JOIN sys.all_objects AS obj ON obj.object_id = prmssn.major_id and prmssn.class = 1
+where grantee_principal.name not in (''guest'', ''public'')
+order by grantee_principal.name, [SchemaName], obj.name
+';
+
+select * from ##inviv_obj_access
+where ObjectName <> 'sql_expression_dependencies' 
+order by DBName, Grantee, SchemaName, ObjectName;
+
+
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##inviv_obj_access'
+AND type in (N'U'))
+DROP TABLE ##inviv_obj_access;
+GO

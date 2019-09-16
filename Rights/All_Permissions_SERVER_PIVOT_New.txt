@@ -1,0 +1,159 @@
+----server permissions
+declare @databaseNameINPUT varchar(200), @Principal_Type_Desc varchar(200), @Principal_Name varchar(200), @Target_Class_Desc varchar(200), @Target_Object varchar(200), @Grantor varchar(200);
+
+--set @Principal_Type_Desc = 'SQL_LOGIN' 
+--set @Principal_Name = 'NT AUTHORITY\SYSTEM'
+--set @Target_Class_Desc = 'ENDPOINT' 
+--set @Target_Object = 'sysadmin'
+--set @Grantor = 'sa'   --> (for impersonation, view def on logins etc)
+
+SET NOCOUNT ON;
+if object_id('tempdb..#Srvr_Principals') is not null drop table #Srvr_Principals;
+create table #Srvr_Principals 
+(
+  id1 int identity(1,1)
+ ,Grantor         VARCHAR(200)
+ ,Grantor_Type_desc VARCHAR(200)
+ ,Principal_Type_Desc		VARCHAR(200)
+ ,Principal_Name		VARCHAR(200)
+ ,Target_Class     varchar(200)
+ ,Target_Class_Desc		VARCHAR(200)
+ ,Target_Object		VARCHAR(200)
+ ,create_date datetime
+ ,modify_date datetime
+ ,is_disabled char(1)
+ ,Securables		VARCHAR(200)
+ ,Grant_State		VARCHAR(200)
+ ,filter1		bit constraint df_filter1 default (0)
+ ,role_Xref		tinyint constraint df_role_Xref default (0)
+);
+
+create unique clustered index UQ_Srvr_Principals on #Srvr_Principals (id1 asc);
+create nonclustered index NC_Srvr_Principals on #Srvr_Principals (filter1 asc);
+
+insert into #Srvr_Principals
+(Grantor, Grantor_Type_desc, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object, create_date, modify_date, is_disabled, Securables, Grant_State, role_Xref)
+select princi3.name as Grantor, princi3.type_desc as Grantor_Type_desc,
+princi.type_desc as Principal_Type_Desc,
+princi.name as Principal_Name, 
+perms.class_desc as Target_Class_Desc,  
+@@servername  as Target_Object,
+princi.create_date as create_date,
+princi.modify_date,
+(case when princi.is_disabled = 1 then 'Y' else ''  end) as is_disabled,
+perms.[permission_name] as Securables,
+perms.state_desc as Grant_State,
+1
+from      sys.server_permissions perms
+inner join sys.server_principals princi on princi.principal_id  = perms.grantee_principal_id 
+inner join sys.server_principals princi3 on princi3.principal_id  = perms.grantor_principal_id  
+where princi.name <>'public' and princi.type in ('G','R','S','U') and princi.name not like '##%'
+and not (perms.[permission_name] = 'connect sql' and perms.state_desc = 'grant')
+
+UNION
+
+select princi3.name as Grantor, princi3.type_desc as Grantor_Type_desc,
+princi.type_desc as Principal_Type_Desc,
+princi.name as Principal_Name, 
+princi2.type_desc as Target_Class_Desc,  
+princi2.name as Target_Object,
+princi.create_date as create_date,
+princi.modify_date,
+(case when princi.is_disabled = 1 then 'Y' else ''  end) as is_disabled,
+'1_Role_Member_XRef' as Securables,
+'Role_Member_Info_ONLY' as Grant_State,
+2
+from      sys.server_permissions perms
+inner join sys.server_principals princi on princi.principal_id  = perms.grantee_principal_id 
+inner join sys.server_principals princi3 on princi3.principal_id  = perms.grantor_principal_id 
+inner join sys.server_role_members roleMembers on roleMembers.member_principal_id = princi.principal_id 
+inner join sys.server_principals princi2 on  princi2.principal_id = roleMembers.role_principal_id 
+;
+
+
+/* CREATE RESULTSET */
+insert into #Srvr_Principals
+(Grantor, Grantor_Type_desc, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object, create_date, modify_date, is_disabled, Securables, Grant_State, filter1, role_Xref)
+select Grantor, Grantor_Type_desc, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object, create_date, modify_date, is_disabled, Securables, Grant_State, 1, role_Xref 
+from #Srvr_Principals spr1
+where 
+    ((ISNULL(@Principal_Type_Desc, 'null') = 'null') or
+     (ISNULL(@Principal_Type_Desc, 'null') <> 'null' and spr1.Principal_Type_Desc = @Principal_Type_Desc))
+and ((ISNULL(@Principal_Name, 'null') = 'null') or
+     (ISNULL(@Principal_Name, 'null') <> 'null' and spr1.Principal_Name = @Principal_Name))
+and ((ISNULL(@Target_Class_Desc, 'null') = 'null') or
+     (ISNULL(@Target_Class_Desc, 'null') <> 'null' and spr1.Target_Class_Desc = @Target_Class_Desc))
+and ((ISNULL(@Target_Object, 'null') = 'null') or
+     (ISNULL(@Target_Object, 'null') <> 'null' and spr1.Target_Object = @Target_Object))
+and ((ISNULL(@Grantor, 'null') = 'null') or
+     (ISNULL(@Grantor, 'null') <> 'null' and spr1.Grantor = @Grantor))
+order by role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object
+
+if exists (select 1 from #Srvr_Principals spr1 where spr1.filter1 = 1)
+begin -- with existenace check 
+
+/* NON-PIVOT DISPLAY STARTS */
+/*
+select Grantor, Grantor_Type_desc, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object, Securables, Grant_State, create_date, modify_date, is_disabled
+,case spr1.Securables
+when  '1_Role_Member_XRef'
+then 'ALTER SERVER ROLE ' + quotename(spr1.Target_Object) + ' ADD MEMBER ' + quotename(spr1.Principal_Name)
+else
+	case spr1.Target_Class_Desc
+	when 'SERVER_PRINCIPAL' 
+	then spr1.Grant_State + ' ' + spr1.Securables + ' on ' + quotename(spr1.Grantor) + ' to ' + quotename(spr1.Principal_Name)
+	else spr1.Grant_State + ' ' + spr1.Securables + ' to ' + quotename(spr1.Principal_Name)
+	end
+end as script_permissions
+from #Srvr_Principals spr1
+where spr1.filter1 = 1
+order by role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object;
+*/
+/* NON-PIVOT DISPLAY ENDS */
+
+/* PIVOT DISPLAY STARTS */
+--/*
+if object_id('tempdb..#colT') is not null drop table #colT;
+create table #colT (Target_Class_Desc1  varchar(200), colName varchar(200));
+
+insert into #colT
+select distinct Target_Class_Desc, Securables
+from #Srvr_Principals spr1
+where spr1.filter1 = 1
+order by Target_Class_Desc desc, Securables;
+
+DECLARE @colsIsNull VARCHAR(4000);
+set @colsIsNull = '';
+SELECT  @colsIsNull = STUFF((SELECT DISTINCT TOP 100 PERCENT ', isnull([' + t1.colName +'],'''') AS ['+t1.colName+']'
+FROM #colT AS t1 
+FOR XML PATH('')), 1, 2, '') + '';
+
+DECLARE @cols VARCHAR(4000);
+set @cols = '';
+SELECT  @cols = STUFF((SELECT DISTINCT TOP 100 PERCENT ', [' + t1.colName +']'
+FROM #colT AS t1
+FOR XML PATH('')), 1, 2, '') + '';
+
+declare @SQLQuery nvarchar(4000);
+set @SQLQuery = '';
+set @SQLQuery = N'SELECT Grantor, Grantor_Type_desc, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object, create_date, modify_date, is_disabled, '+@colsIsNull +'
+FROM (SELECT Grantor, Grantor_Type_desc, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object,  create_date, modify_date, is_disabled, ColName, Grant_State, role_Xref
+FROM  #Srvr_Principals  spr1
+inner join #colT  a1 on a1.colName = spr1.Securables 
+where spr1.filter1 = 1) p
+'+ ' PIVOT ' + '(MAX([Grant_State]) FOR ColName IN ( '+ @cols +' ) ) AS pvt
+order by role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object
+;'; --do NOT change the order
+
+exec sp_executesql @SQLQuery;
+set @SQLQuery = '';
+
+if object_id('tempdb..#colT') is not null drop table #colT;
+--*/
+/* PIVOT DISPLAY ENDS */
+end -- with existenace check 
+else print 'no such permissions'
+
+if object_id('tempdb..#Srvr_Principals') is not null drop table #Srvr_Principals;
+go
+

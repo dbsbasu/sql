@@ -1,0 +1,6 @@
+
+select smp1.name as mail_profile, dp1.name as principal_name 
+from msdb.dbo.sysmail_principalprofile smpp1
+inner join msdb.sys.database_principals dp1 on dp1.sid = smpp1.principal_sid --and dp1.name = @loginName
+inner join msdb.dbo.sysmail_profile smp1 on smp1.profile_id = smpp1.profile_id
+

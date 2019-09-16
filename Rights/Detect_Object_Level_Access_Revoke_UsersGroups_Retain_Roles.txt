@@ -1,0 +1,101 @@
+
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##inviv_obj_access' AND type in (N'U')) 
+DROP TABLE ##inviv_obj_access; 
+GO 
+SET NOCOUNT ON; 
+declare @sql_stmt varchar(4000); 
+declare @sql_stmt2 varchar(4000); 
+declare @first_time tinyint; 
+set @first_time = 1; 
+declare @DBName	varchar(320); 
+declare @prev_DBName	varchar(320); 
+set @prev_DBName = ''; 
+declare @Grantee		varchar(80); 
+declare @GranteeType		varchar(80); 
+declare @SchemaName		varchar(80); 
+declare @ObjectName		varchar(80); 
+declare @ObjectType		varchar(80); 
+declare @Permission		varchar(80); 
+declare @PermissionState	varchar(80); 
+ 
+create table ##inviv_obj_access 
+( 
+DBName	varchar(320), 
+Grantee		varchar(80) not null default '', 
+GranteeType		varchar(80) not null default '', 
+SchemaName		varchar(80) not null default '', 
+ObjectName		varchar(80) not null default '', 
+ObjectType		varchar(80) not null default '', 
+Permission		varchar(80) not null default '', 
+PermissionState	varchar(80) not null default '', 
+PermissionClassDesc	varchar(80) not null default '' 
+); 
+ 
+EXEC sp_msForEachDB ' 
+if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'',''[ResourceDb]'',''[dbaUtils]'') return 
+-- -->specific database name below
+if ''[?]'' not in (''[BIServicing]'') return
+use [?] 
+ 
+insert into ##inviv_obj_access 
+SELECT db_name() as DBName, grantee_principal.name as [Grantee], grantee_principal.type_desc as [GranteeType], schema_name(obj.schema_id) AS [SchemaName], obj.name AS [ObjectName], obj.type_desc as [ObjectType], prmssn.permission_name as [Permission], prmssn.state_desc as [PermissionState], prmssn.class_desc as [PermissionClassDesc] 
+FROM  sys.database_permissions AS prmssn 
+INNER JOIN sys.database_principals AS grantee_principal ON grantee_principal.principal_id = prmssn.grantee_principal_id 
+INNER JOIN sys.all_objects AS obj ON obj.object_id = prmssn.major_id and prmssn.class = 1 
+where grantee_principal.name not in (''guest'', ''public'')  
+union 
+SELECT db_name() as DBName, grantee_principal.name as [Grantee], grantee_principal.type_desc as [GranteeType], schema_name(obj.schema_id) AS [SchemaName], obj.name AS [ObjectName], ''Schema'' as [ObjectType], prmssn.permission_name as [Permission], prmssn.state_desc as [PermissionState], prmssn.class_desc as [PermissionClassDesc] 
+FROM  sys.database_permissions AS prmssn 
+INNER JOIN sys.database_principals AS grantee_principal ON grantee_principal.principal_id = prmssn.grantee_principal_id  
+INNER JOIN sys.schemas AS obj ON obj.schema_id = prmssn.major_id  and prmssn.class = 3 
+where grantee_principal.name not in (''guest'', ''public'') and grantee_principal.type_desc <> ''DATABASE_ROLE''; 
+; 
+'; 
+select 'a REVOKE script will be created for below Users (if any), since DIRECT Obj Level access is NOT permitted' as 'what action will I take?' 
+select * from ##inviv_obj_access a1 
+where ObjectName <> 'sql_expression_dependencies' and granteeType <> 'DATABASE_ROLE'  
+order by a1.DBName, a1.ObjectType, a1.SchemaName, a1.ObjectName, a1.Permission, a1.PermissionState 
+
+DECLARE revoke_csr CURSOR FOR 
+select DBName, Permission, SchemaName, Objectname, Grantee, ObjectType 
+from ##inviv_obj_access 
+--where granteeType in ('WINDOWS_GROUP', 'WINDOWS_USER') 
+where granteeType <> 'DATABASE_ROLE'  
+order by DBName, Grantee, SchemaName, ObjectName, ObjectType; 
+ 
+open revoke_csr; 
+FETCH NEXT from revoke_csr INTO @DBName, @Permission, @SchemaName, @Objectname, @Grantee, @ObjectType; 
+ 
+WHILE @@FETCH_STATUS = 0 
+Begin 
+if (@DBName <> @prev_DBName)  
+begin 
+ set @sql_stmt2 = ''; 
+ set @sql_stmt2 = char(10); 
+ set @sql_stmt2 = @sql_stmt2 + 'use ' + quotename(@DBName) + char(10); 
+ set @sql_stmt2 = @sql_stmt2 + 'go '; 
+ print (@sql_stmt2);  
+end 
+set @sql_stmt = ''; 
+if @ObjectType = 'Schema' 
+set @sql_stmt = 'REVOKE '+@Permission+' ON SCHEMA::'+quotename(@Objectname)+' TO '+ quotename(@Grantee) + ';'; 
+else 
+set @sql_stmt = 'REVOKE '+@Permission+' ON '+quotename(@SchemaName)+'.'+quotename(@Objectname)+' TO '+ quotename(@Grantee) + ';'; 
+ 
+print (@sql_stmt); 
+set @prev_DBName = @DBName; 
+set @first_time = 0; 
+FETCH NEXT from revoke_csr INTO @DBName, @Permission, @SchemaName, @Objectname, @Grantee, @ObjectType; 
+end 
+CLOSE revoke_csr;; 
+DEALLOCATE revoke_csr; 
+ 
+select 'a REVOKE script will NOT be created for below Users, since Obj Level access is permitted thru DB Roles' as 'what action will I take?' 
+select * from ##inviv_obj_access a1 
+where granteeType = 'DATABASE_ROLE' AND ObjectName <> 'sql_expression_dependencies'   
+order by a1.DBName, a1.ObjectType, a1.SchemaName, a1.ObjectName, a1.Permission, a1.PermissionState 
+ 
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##inviv_obj_access' AND type in (N'U')) 
+DROP TABLE ##inviv_obj_access; 
+GO 
+ 

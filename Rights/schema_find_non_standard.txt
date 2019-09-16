@@ -1,0 +1,6 @@
+select sc1.name as SchemaName, dbp.name as SchemaOwner, dbp.type_desc
+from sys.schemas sc1
+inner join sys.database_principals dbp on dbp.principal_id = sc1.principal_id
+where sc1.name not in ('sys','INFORMATION_SCHEMA','guest','db_securityadmin','db_owner','db_denydatawriter','db_denydatareader','db_ddladmin','db_datawriter','db_datareader','db_backupoperator','db_accessadmin')
+--and dbp.name not in ('sys','INFORMATION_SCHEMA','guest','db_securityadmin','db_owner','db_denydatawriter','db_denydatareader','db_ddladmin','db_datawriter','db_datareader','db_backupoperator','db_accessadmin')
+order by sc1.name asc;
