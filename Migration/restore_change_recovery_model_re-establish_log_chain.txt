@@ -1,0 +1,44 @@
+use [master]
+go
+--backup full
+backup database [db_vlf] to disk = N'N:\Mounts\Backups\db_vlf\db_vlf_copy.bak' 
+with name =N'db_vlf - Full Backup Full Recovery', stats = 10
+
+
+--restore with standby (recovery would also work)
+restore database [db_vlf_copy] from disk = N'N:\Mounts\Backups\db_vlf\db_vlf_copy.bak'
+with file = 1, 
+move N'db_vlf' to N'N:\Mounts\Data\db_vlf_copy.mdf',
+move N'db_vlf_log' to N'N:\Mounts\Logs\db_vlf_copy_log.ldf',
+standby = N'N:\Mounts\Backups\db_vlf\db_vlf_copy_UNDO.ldf'
+
+--backup log
+backup log [db_vlf] to disk = N'N:\Mounts\Backups\db_vlf\db_vlf_log01.trn' 
+
+--change to simple recovery
+alter database [db_vlf] set recovery simple with NO_WAIT
+
+--backup diff
+backup database [db_vlf] to disk = N'N:\Mounts\Backups\db_vlf\db_vlf_diff02.bak' 
+with differential, name =N'db_vlf - Diff Backup Simple Recovery'
+
+--change to full recovery
+alter database [db_vlf] set recovery full with NO_WAIT
+
+--backup diff
+backup database [db_vlf] to disk = N'N:\Mounts\Backups\db_vlf\db_vlf_diff03.bak' 
+with differential, name =N'db_vlf - Diff Backup Full Recovery'
+
+--backup log
+backup log [db_vlf] to disk = N'N:\Mounts\Backups\db_vlf\db_vlf_log02.trn' 
+with name =N'db_vlf - Log Backup Full Recovery'
+
+
+
+--re-establish log chain by restoring a diff backup
+restore database [db_vlf_copy] from disk = N'N:\Mounts\Backups\db_vlf\db_vlf_diff03.bak' 
+with standby = N'N:\Mounts\Backups\db_vlf\db_vlf_copy_UNDO.ldf'  
+
+--continue to restore log backups
+restore log [db_vlf_copy] from disk = N'N:\Mounts\Backups\db_vlf\db_vlf_log02.trn' 
+with standby = N'N:\Mounts\Backups\db_vlf\db_vlf_copy_UNDO.ldf'  

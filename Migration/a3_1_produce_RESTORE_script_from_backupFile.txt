@@ -1,0 +1,173 @@
+/*
+create restore script off of database backup file
+INPUT : backup file 
+after the restore script is generated please remember to change database name and physical name, if necessary
+*/
+declare @backupFile varchar(800);
+set @backupFile = 'N:\Mounts\Backups\db1\Full\db1_Backup_20151212091504_01.BAK';  --> INPUT (1) backup file 
+
+----------------------------------------
+--do NOT change any part below this line
+set nocount on;
+declare @sqlcmd1 varchar(4000) = '';
+declare @logical_name varchar(400) = '';
+declare @dbname varchar(400) = ''; 
+declare @physical_name varchar(400) = '';
+declare @fileListTable table
+(
+    LogicalName          nvarchar(400),
+    PhysicalName         nvarchar(400),
+    [Type]               char(1),
+    FileGroupName        nvarchar(400),
+    Size                 numeric(20,0),
+    MaxSize              numeric(20,0),
+    FileID               bigint,
+    CreateLSN            numeric(25,0),
+    DropLSN              numeric(25,0),
+    UniqueID             uniqueidentifier,
+    ReadOnlyLSN          numeric(25,0),
+    ReadWriteLSN         numeric(25,0),
+    BackupSizeInBytes    bigint,
+    SourceBlockSize      int,
+    FileGroupID          smallint,
+    LogGroupGUID         uniqueidentifier,
+    DifferentialBaseLSN  numeric(25,0),
+    DifferentialBaseGUID uniqueidentifier,
+    IsReadOnl            bit,
+    IsPresent            bit,
+    TDEThumbprint        varbinary(32) 
+);
+
+--only to get the database name starts
+declare @headerTable table 
+( 
+	BackupName varchar(256),
+	BackupDescription varchar(256),
+	BackupType varchar(256),        
+	ExpirationDate varchar(256),
+	Compressed varchar(256),
+	Position varchar(256),
+	DeviceType varchar(256),        
+	UserName varchar(256),
+	ServerName varchar(256),
+	DatabaseName varchar(400),
+	DatabaseVersion varchar(256),        
+	DatabaseCreationDate varchar(256),
+	BackupSize varchar(256),
+	FirstLSN varchar(256),
+	LastLSN varchar(256),        
+	CheckpointLSN varchar(256),
+	DatabaseBackupLSN varchar(256),
+	BackupStartDate varchar(256),
+	BackupFinishDate varchar(256),        
+	SortOrder varchar(256),
+	CodePage varchar(256),
+	UnicodeLocaleId varchar(256),
+	UnicodeComparisonStyle varchar(256),        
+	CompatibilityLevel varchar(256),
+	SoftwareVendorId varchar(256),
+	SoftwareVersionMajor varchar(256),        
+	SoftwareVersionMinor varchar(256),
+	SoftwareVersionBuild varchar(256),
+	MachineName varchar(256),
+	Flags varchar(256),        
+	BindingID varchar(256),
+	RecoveryForkID varchar(256),
+	Collation varchar(256),
+	FamilyGUID varchar(256),        
+	HasBulkLoggedData varchar(256),
+	IsSnapshot varchar(256),
+	IsReadOnly varchar(256),
+	IsSingleUser varchar(256),        
+	HasBackupChecksums varchar(256),
+	IsDamaged varchar(256),
+	BeginsLogChain varchar(256),
+	HasIncompleteMetaData varchar(256),        
+	IsForceOffline varchar(256),
+	IsCopyOnly varchar(256),
+	FirstRecoveryForkID varchar(256),
+	ForkPointLSN varchar(256),        
+	RecoveryModel varchar(256),
+	DifferentialBaseLSN varchar(256),
+	DifferentialBaseGUID varchar(256),        
+	BackupTypeDescription varchar(256),
+	BackupSetGUID varchar(256),
+	CompressedBackupSize varchar(256),        
+	Containment varchar(256)
+); 
+insert into @headerTable exec('restore headeronly from disk = '''+@backupFile+'''');
+select @dbname = ht1.DatabaseName from @headerTable ht1;
+--only to get the database name ends
+
+insert into @fileListTable exec('restore filelistonly from disk = '''+@backupFile+'''');
+
+/*
+select * from @headerTable;
+select * from @fileListTable;
+*/
+select 
+BackupTypeDescription,
+DatabaseName,
+RecoveryModel,
+CompatibilityLevel,
+DatabaseCreationDate,
+convert(decimal(12,3),round(cast(BackupSize as numeric(20,0))/(1024.0*1024),3)) as BackupSize_MB,
+convert(decimal(12,3),round(cast(BackupSize as numeric(20,0))/(1024.0*1024*1024),3)) as BackupSize_GB,
+BackupStartDate,
+BackupFinishDate,  
+IsDamaged,
+IsCopyOnly,
+Compressed,
+convert(decimal(12,3),round(cast(CompressedBackupSize as numeric(20,0))/(1024.0*1024),3)) as BackupSize_MB,
+convert(decimal(12,3),round(cast(CompressedBackupSize as numeric(20,0))/(1024.0*1024*1024),3)) as BackupSize_GB,
+ServerName,
+MachineName,
+IsReadOnly,
+BackupName
+from @headerTable;
+
+select 
+LogicalName,
+PhysicalName,
+[Type],
+FileGroupName,
+convert(decimal(12,3),round(Size/(1024.0*1024),3)) as Size_MB,
+convert(decimal(12,3),round(Size/(1024.0*1024*1024),3)) as Size_GB,
+MaxSize,
+FileID,
+IsReadOnl
+from @fileListTable;
+
+
+set @sqlcmd1 = 'use [master]' + CHAR(10);
+set @sqlcmd1 = @sqlcmd1 + 'go' + CHAR(10);
+set @sqlcmd1 = @sqlcmd1 + 'RESTORE DATABASE ' +QUOTENAME(@dbname) + CHAR(10) + ' FROM DISK = ''' + @backupFile +'''';
+set @sqlcmd1 = @sqlcmd1 + ' WITH  FILE = 1, ';
+print @sqlcmd1;
+set @sqlcmd1 = '';
+declare all_files cursor read_only
+for select LogicalName, PhysicalName
+from @fileListTable flt1
+order by flt1.[Type], flt1.FileGroupID, flt1.FileID asc;
+open all_files;
+fetch next from all_files into @logical_name, @physical_name;
+while (@@fetch_status <> -1)
+begin
+	if (@@fetch_status <> -2)
+	begin
+	set @sqlcmd1 = '';
+	set @sqlcmd1 = ' MOVE N''' + @logical_name + '''' + ' TO N''' + @physical_name + ''',';
+	print @sqlcmd1;
+	set @sqlcmd1 = '';
+	end
+	fetch next from all_files into @logical_name, @physical_name
+end
+close all_files;
+deallocate all_files;
+set @sqlcmd1 = '';
+set @sqlcmd1 = ' NOUNLOAD,  REPLACE,  STATS = 10';
+set @sqlcmd1 = @sqlcmd1 + CHAR(10);
+set @sqlcmd1 = @sqlcmd1 + 'GO ' + CHAR(10);
+print @sqlcmd1;
+
+

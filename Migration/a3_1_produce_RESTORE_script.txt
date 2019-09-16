@@ -1,0 +1,117 @@
+-- produce database restore script. as easy as 1, 2, 3...
+use [master]
+go
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##file_tb' AND type in (N'U'))
+DROP TABLE ##file_tb
+GO
+set nocount on;
+declare @Litespeed_Ind char(1);
+--                 please indicate ('y') if your backup is Litespeed              <--- (1)
+set @Litespeed_Ind = 'n';
+declare @target_instance varchar(80);
+--                 your target server name                                        <--- (2)
+set @target_instance = 'xxx';
+--                 your backup path and I will append target_Server\database.bak' <--- (3)
+declare @backup_device varchar(80);
+set @backup_device = '\\SQLBKUP-NonProd-1\sqlbkup01\';
+DECLARE @db1name varchar(80);
+declare @sqlcmd0 varchar(8000);
+declare @sqlcmd1 varchar(8000);
+declare @sqlcmd2 varchar(8000);
+declare @sqlcmd3 varchar(8000);
+declare @sqlcmdL1 varchar(8000);
+declare @sqlcmdL2 varchar(8000);
+declare @sqlcmdL3 varchar(8000);
+declare @log_name varchar(400);
+declare @phy_name varchar(400);
+create table ##file_tb
+(
+	 log_name varchar(400)
+	,crap1    smallint 
+	,phy_name varchar(400)
+	,crap2    varchar(80)
+	,crap3    varchar(80)
+	,crap4    varchar(80)
+	,crap5    varchar(80)
+	,crap6    varchar(80)
+);
+
+DECLARE user_dbs CURSOR READ_ONLY FOR 
+select name from master..sysdatabases 
+where name not in ('master', 'tempdb', 'model', 'msdb', 'DBAUtils');
+OPEN user_dbs;
+FETCH NEXT FROM user_dbs INTO @db1name;
+WHILE (@@fetch_status <> -1)
+BEGIN
+	IF (@@fetch_status <> -2)
+	BEGIN
+		set @sqlcmd0 = '';
+		set @sqlcmd0 = 'insert ##file_tb exec' + quotename(@db1name) + '..sp_helpfile';
+		exec (@sqlcmd0);
+		update ##file_tb
+		set log_name = REPLACE(REPLACE(log_name,SPACE(1),'@'),'@',''), phy_name = REPLACE(REPLACE(phy_name,SPACE(1),'@'),'@','')
+		set @sqlcmd1 = '';
+		set @sqlcmd1 = 'use [master]' + CHAR(10);
+		set @sqlcmd1 = @sqlcmd1 + 'go' + CHAR(10);
+		set @sqlcmd1 = @sqlcmd1 + 'RESTORE DATABASE ' +QUOTENAME(@db1name) + CHAR(10) + ' FROM DISK = ';
+		set @sqlcmd1 = @sqlcmd1 + 'N''' +@backup_device+ @target_instance + '\Data\';
+		set @sqlcmd1 = @sqlcmd1 + @db1name + '.bak''' + CHAR(10);
+		set @sqlcmd1 = @sqlcmd1 + ' WITH  FILE = 1, ';
+		set @sqlcmdL1 = '';
+		set @sqlcmdL1 = 'use [master]' + CHAR(10);
+		set @sqlcmdL1 = @sqlcmdL1 + 'exec master.dbo.xp_restore_database @database =  N''' + @db1name + ''',' + CHAR(10) + ' @filename = ';
+		set @sqlcmdL1 = @sqlcmdL1 + 'N''' +@backup_device + @target_instance + '\Data\';
+		set @sqlcmdL1 = @sqlcmdL1 + @db1name + '.bak'',' + CHAR(10);
+		set @sqlcmdL1 = @sqlcmdL1 + ' @filenumber = 1, ' + CHAR(10);
+		set @sqlcmdL1 = @sqlcmdL1 + ' @with = N''REPLACE'', ' + CHAR(10);
+		set @sqlcmdL1 = @sqlcmdL1 + ' @with = N''STATS = 10'', ' ;
+		if @Litespeed_Ind = 'y'
+			print @sqlcmdL1;
+		else
+			print @sqlcmd1;
+		DECLARE all_files CURSOR READ_ONLY
+		FOR select log_name, phy_name
+		from ##file_tb
+		order by crap6 asc, substring(phy_name,len(phy_name)-3,len(phy_name)) asc, log_name asc;
+		OPEN all_files;
+		FETCH NEXT FROM all_files INTO @log_name, @phy_name;
+		WHILE (@@fetch_status <> -1)
+		BEGIN
+			IF (@@fetch_status <> -2)
+			BEGIN
+			set @sqlcmd2 = '';
+			set @sqlcmd2 = ' MOVE N''' + @log_name + '''' + ' TO N''' + @phy_name + ''',';
+			set @sqlcmdL2 = '';
+			set @sqlcmdL2 = ' @with = N''MOVE N''''' + @log_name + ''''' TO N''''' + @phy_name + ''''''',';
+			if @Litespeed_Ind = 'y'
+				print @sqlcmdL2;
+			else
+				print @sqlcmd2;
+			END
+			FETCH NEXT FROM all_files INTO @log_name, @phy_name
+		END
+		CLOSE all_files
+		DEALLOCATE all_files
+		set @sqlcmd3 = '';
+		set @sqlcmd3 = ' NOUNLOAD,  REPLACE,  STATS = 10';
+		set @sqlcmd3 = @sqlcmd3 + CHAR(10);
+		set @sqlcmd3 = @sqlcmd3 + 'GO ' + CHAR(10);
+		set @sqlcmdL3 = ' @affinity = 0,' + CHAR(10);
+		set @sqlcmdL3 = @sqlcmdL3 +' @logging = 0' + CHAR(10);
+		set @sqlcmdL3 = @sqlcmdL3 + 'GO ' + CHAR(10);
+		if @Litespeed_Ind = 'y'
+			print @sqlcmdL3;
+		else
+			print @sqlcmd3;
+		--select * from ##file_tb
+		--order by crap6 asc, substring(phy_name,len(phy_name)-3,len(phy_name)) asc, log_name asc;
+		delete from ##file_tb;
+	FETCH NEXT FROM user_dbs INTO @db1name;
+	END;
+END;
+CLOSE user_dbs;
+DEALLOCATE user_dbs;
+
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##file_tb' AND type in (N'U'))
+DROP TABLE ##file_tb
+GO

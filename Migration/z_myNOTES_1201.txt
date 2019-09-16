@@ -1,0 +1,88 @@
+0. check clustering, failover and drives for v-instances
+	that is required in the restore step
+
+select * from sys.dm_io_cluster_shared_drives
+
+1. alias creation
+
+2. is there any sql agent job not owned by dba ?
+	>> looked at the list.
+
+21. block server
+
+3. Copy logins
+	>>note - shared servers - check db users already present on target server
+
+	if required:
+	run MoveSQLLogins_2000_or_2005.sql
+	>> run exec sp_help_revlogin on the source server:
+		copy results
+	>> run the generated script onto 2008 target server
+
+3a. kill all connections
+
+3b. Make the source db read-only
+
+4. backup database
+	find out - space used by the source database
+	use backup database script
+	run on source server, master
+
+5. restore database
+	use GUI
+
+	alternatively,
+	use script files_list to obtain logical file names from the backup files
+	use restore database script
+	run on target server, master
+
+5b. Make the target db read-write
+
+
+6. delete bogus schema
+	if there are objects owned by bogus schema, transfer their ownership, using
+	else it will prevent you from dropping the user associated
+
+--alter schema dbo transfer bogus_schema.object
+
+7. delete app-specific (non-standard) users
+	I would delete users from newly restored databases from target server
+	this makes sure that new dbs don't have object level grants
+
+	do NOT touch dbo, info schema, guest, sys etc
+
+8. create standard roles and sp
+
+	run script standard_roles
+
+	alternatively,
+	use dbaweb to navigate from target server to new db to Roles to Audit
+	use the script at the bottom to run on new db
+	verify audit again - it should show adherence (green)
+
+9. set database options
+	this changes owner to sa
+	sets compatibility level, recovery page verify to checksum
+
+10. add users back to new db
+	if any sql logins, EXEC sp_change_users_login 'Update_One', 'sql_login', 'sql_user'
+
+11. identify orphan db users by executing script sqlloginAudit
+	>> delete orphan users
+
+12. rebuild all indexes. may like to set appropriate fillfactor
+
+13. udpate statistics by using -- don't do this
+exec sp_MSforeachtable 'UPDATE STATISTICS ? WITH FULLSCAN'
+
+
+
+
+14. update dbaweb
+	update server tracker on the new server
+	edit new dtabase to update application, description/comments from old one
+	edit old db/server. add comment as 'migrated. target server name'
+
+15. update IDR for prod
+
+16. do not detach old dbs until prod migration is cimplete. you may take old db offline in non-prod. detach old db in prod.

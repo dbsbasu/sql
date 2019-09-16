@@ -1,0 +1,21 @@
+--SCRIPT TO BE RUN ON THE PRINCIPAL SERVER (CURRENT OWNER OF THE MIRRORED DATABASES)
+
+DECLARE @db sysname, @q varchar(max);
+    DECLARE cur_db CURSOR FOR
+        SELECT name FROM sys.databases sd inner join sys.database_mirroring sdm ON sd.database_id = sdm.database_id 
+		WHERE sd.database_id >4 and sd.name <> 'DBAUtils' and sdm.mirroring_state_desc = 'SYNCHRONIZED' ;
+    OPEN cur_db;
+    WHILE 1=1
+    BEGIN
+        FETCH NEXT FROM cur_db INTO @db;
+        IF @@FETCH_STATUS <> 0
+            BREAK;
+        SET @q = N'ALTER DATABASE [' + @db + N'] SET PARTNER FAILOVER';
+        EXEC(@q);
+    END;
+    CLOSE cur_db;
+    DEALLOCATE cur_db;
+
+
+
+

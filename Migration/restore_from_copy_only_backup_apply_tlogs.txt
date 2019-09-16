@@ -1,0 +1,38 @@
+--backup
+BACKUP DATABASE [db1] TO DISK = N'N:\Mounts\Backups\db1\Full\\db1_copy_only.bak' 
+WITH COMPRESSION, COPY_ONLY, NOFORMAT, NOINIT,NAME =N'db1 - Full Database Copy_Only Backup', SKIP, NOREWIND, NOUNLOAD,  STATS = 10
+
+--restore with norecovery
+use [master]
+go
+RESTORE DATABASE [db1_restored_from_copy_only_full_backup]
+ FROM DISK = N'N:\Mounts\Backups\db1\Full\\db1_copy_only.bak'
+ WITH  FILE = 1, 
+ MOVE N'db1' TO N'N:\Mounts\Data\db1_copy_only.mdf',
+ MOVE N'db1_log' TO N'N:\Mounts\Logs\db1_copy_only_log.ldf',
+ NOUNLOAD, norecovery, REPLACE,  STATS = 10
+GO 
+
+--continue to restore tranlog with norecovery
+RESTORE LOG [db1_restored_from_copy_only_full_backup] 
+FROM  DISK = 'N:\Mounts\Backups\SQLBACKUPS\Local\db1\TLog\db1_tlog_20160112101400.TRN' 
+WITH  FILE = 1,  
+NOUNLOAD, norecovery, STATS = 10
+
+RESTORE LOG [db1_restored_from_copy_only_full_backup] 
+FROM  DISK = 'N:\mounts\backups\db1\Tlog\db1_20160112151501.trn' 
+WITH  FILE = 1,  
+NOUNLOAD, norecovery, STATS = 10
+
+RESTORE LOG [db1_restored_from_copy_only_full_backup] 
+FROM  DISK = 'N:\Mounts\Backups\SQLBACKUPS\Local\db1\TLog\db1_tlog_20160112101600.TRN' 
+WITH  FILE = 1,  
+NOUNLOAD, norecovery, STATS = 10
+
+--continue to restore tranlog with standby
+RESTORE LOG [db1_restored_from_copy_only_full_backup] 
+FROM  DISK = 'N:\Mounts\Backups\SQLBACKUPS\Local\db1\TLog\db1_tlog_20160112101600.TRN' 
+WITH  FILE = 1,  
+STANDBY = N'N:\Mounts\Logs\db1_restored_from_copy_only_full_backup_UNDO.ldf',  
+NOUNLOAD,  STATS = 10
+

@@ -1,0 +1,42 @@
+--The script has one MOVE statement for a data file and one MOVE statement for a log file.  
+--If you have multiple data and log files, add one additional MOVE statement for each additional
+--data or log file.  This script should be run against the DESTINATION server.
+
+--following script will list the logical file names
+use [master]
+restore filelistonly from disk = N'\\xxx\sqlbkup01\xxx\Data\xxx.bak'
+-- use the logical file names and move to "new" physical file names onto the target server
+
+
+
+========================================================================================
+
+standard example
+use [master]
+RESTORE DATABASE [NewDatabaseName] /* Specify database name to restore */
+FROM  
+DISK = N'Backup_Path' /* Specify backup file path */
+WITH  FILE = 1,  
+MOVE N'LogicalName' TO N'PhysicalPath', /* Specify logical data file name and physical data file path */
+MOVE N'LogicalName' TO N'PhysicalPath', /* Specify logical log file name and physical log file path */
+NOUNLOAD,  REPLACE,  STATS = 10
+GO
+
+
+
+--LiteSpeed Restore Script
+use [master]
+exec master.dbo.xp_restore_database @database = N'' , /* Specify database name */
+@filename = N'Backup_Path', /* Specify backup file path */
+@filenumber = 1,
+@with = N'REPLACE',
+@with = N'STATS = 10',
+@with = N'MOVE N''LogicalName'' TO N''PhysicalPath''', /* Specify logical data file name and physical data file path*/
+
+@with = N'MOVE N''LogicalName'' TO N''PhysicalPath''',/* Specify logical log file name and physical log file path */
+
+@affinity = 0,
+@logging = 0
+
+
+

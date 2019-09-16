@@ -1,0 +1,57 @@
+--run this against source server
+
+use [master]
+declare @sql varchar(2000)
+declare @instancenam varchar(50)
+declare @dbnam varchar(50)
+declare @env char(1)
+declare @path varchar(200)
+declare @litespeed char(1)
+declare @scratchdisk char (1)
+
+set @dbnam = 'xxx' /* Database to backup */
+set @instancenam = 'xxx' /* Target instance */
+set @env = 'D' /* ‘P’ for prod and ‘D’ for non-prod */
+set @litespeed = 'N' /* ‘Y’ if using LiteSpeed otherwise ‘N’ */
+set @scratchdisk = 'N'  /* ‘Y’ if using scratch disk otherwise ‘N’ */
+
+
+if (@env = 'D')
+	begin
+set @path = 'N''\\xxx\sqlbkup01\' + @instancenam + 
+'\Data\' + @dbnam + '.bak'''
+	end
+else
+	begin
+		if (@scratchdisk = 'N')
+			begin
+set @path = 'N''\\xxx\sqlbkup01\' + @instancenam + '\Data\' + @dbnam + '.bak'''
+			end
+		else
+			begin
+				set @path = 'N''X:\' + @dbnam + '.bak'''
+			end
+	end
+
+
+if (@litespeed = 'Y')
+	begin
+set @sql = 'exec master.dbo.xp_backup_database @database = '+ @dbnam 
+		set @sql = @sql + ', @FileName = ' + @path
+	end
+else
+	begin
+		Set @sql = 'BACKUP DATABASE [' + @dbnam + '] '
+		set @sql = @sql + 'TO DISK = ' + @path + ' WITH NOFORMAT, 
+NOINIT,'
+		set @sql = @sql + 'NAME = N''' + @dbnam + '-Full Database 
+Backup'', SKIP, NOREWIND, NOUNLOAD,  STATS = 10'
+	end
+
+exec(@sql)
+
+select @path
+select @sql
+
+GO
+

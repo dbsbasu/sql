@@ -1,0 +1,63 @@
+--simulate a suspect db
+--prep step (USE TEST SERVER ONLY)
+--create db_test_suspect. simple recovery is ok
+CREATE DATABASE [db_test_suspect]
+ CONTAINMENT = NONE
+ ON  PRIMARY 
+( NAME = N'db_test_suspect', FILENAME = N'N:\Mounts\Data\db_test_suspect\db_test_suspect.mdf' , SIZE = 4096KB , FILEGROWTH = 0)
+ LOG ON 
+( NAME = N'db_test_suspect_log', FILENAME = N'N:\Mounts\Logs\db_test_suspect\db_test_suspect_log.ldf' , SIZE = 3072KB , FILEGROWTH = 0)
+GO
+alter authorization on database::db_test_suspect to sa
+
+--create table and add one row
+use [db_test_suspect]
+go
+create table dbo.t1 (id tinyint, comments varchar(20));
+insert into dbo.t1 (id, comments) values (1, 'abc');
+
+/*run this on a new window
+--update the existing row, keep it uncommitted and issue a checkpoint
+use [db_test_suspect]
+go
+begin tran
+update dbo.t1 set comments = 'xyz' where id = 1;
+go
+checkpoint;
+go
+*/
+
+/*--simulate a server crash -- CHANGE SQL STARTUP TYPE AS MANUAL
+SHUTDOWN WITH NOWAIT;
+GO
+*/
+
+--rename tlog file db_test_suspect_log.ldf to db_test_suspect_log_damaged_save.ldf
+
+--bring sql up
+
+--verify status
+select databasepropertyex (N'db_test_suspect', N'status'); --SUSPECT
+select name, state_desc from sys.databases d1 where d1.name = 'db_test_suspect' --RECOVERY_PENDING
+
+--will try setting in emergency. sometimes it maybe necessary to set the database offline / online first
+ALTER DATABASE  db_test_suspect  SET  OFFLINE  WITH ROLLBACK IMMEDIATE
+ALTER DATABASE  db_test_suspect  SET  ONLINE
+
+--set emergency, single user, allow_dataloss, finally multi-user
+ALTER DATABASE  db_test_suspect  SET  EMERGENCY
+--access the database to copy data into another database as much as possible
+--then try allowing data loss
+ALTER DATABASE  db_test_suspect   SET SINGLE_USER  WITH ROLLBACK IMMEDIATE
+DBCC CHECKDB (db_test_suspect, REPAIR_ALLOW_DATA_LOSS) WITH NO_INFOMSGS, ALL_ERRORMSGS; --see msgs below
+ALTER DATABASE db_test_suspect SET MULTI_USER
+
+/*--msgs
+File activation failure. The physical file name "N:\Mounts\Logs\db_test_suspect\db_test_suspect_log.ldf" may be incorrect.
+The log cannot be rebuilt because there were open transactions/users when the database was shutdown, no checkpoint occurred to the database, or the database was read-only. This error could occur if the transaction log file was manually deleted or lost due to a hardware or environment failure.
+Warning: The log for database 'db_test_suspect' has been rebuilt. Transactional consistency has been lost. The RESTORE chain was broken, and the server no longer has context on the previous log files, so you will need to know what they were. You should run DBCC CHECKDB to validate physical consistency. The database has been put in dbo-only mode. When you are ready to make the database available for use, you will need to reset database options and delete any extra log files.
+*/
+
+--cleanup
+--> chnage sql startup type as AUTOMATIC
+--> drop database db_test_suspect 

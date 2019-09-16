@@ -1,0 +1,47 @@
+--get file info  (unabridged version Space_Info_1_DB)
+use [db_db_general_restore]
+go
+select df.*, fg.*
+from sys.database_files df
+left outer join sys.filegroups fg
+on df.data_space_id = fg.data_space_id;
+
+use [master]
+go
+--take a FULL backup
+backup database [db_db_general_restore] to disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_FULL.bak' with stats = 10
+
+--take a DIFF backup
+backup database [db_db_general_restore] to disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_DIFF.bak' with differential
+
+--take a TLOG backup
+backup log [db_db_general_restore] to disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_LOG.trn' 
+
+--get backup info (unabridged version history_backup)
+select top 100 bmf1.physical_device_name, bs1.* 
+from msdb.dbo.backupset bs1 with (nolock)
+inner join msdb.dbo.backupmediafamily bmf1 with (nolock) on bmf1.media_set_id = bs1.media_set_id
+where bs1.database_name = 'db_db_general_restore'
+and bs1.[type] in ('d','i','l')
+order by bs1.backup_start_date desc
+
+--get logical and physical file names to construct restore script
+restore filelistonly from disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_FULL.bak'
+
+--restore with norecovery using FULL backup
+restore database [db_db_general_restore] from disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_FULL.bak'
+with file = 1, 
+move N'db_db_general_restore'     to N'N:\Mounts\Data\db_db_general_restore\db_db_general_restore.mdf',
+move N'db_db_general_restore_log' to N'N:\Mounts\Logs\db_db_general_restore\db_db_general_restore_log.ldf',
+norecovery, replace, stats = 10
+
+--restore DIFF backup and set to standby
+restore database [db_db_general_restore] from disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_DIFF.bak' 
+with standby = N'N:\Mounts\Logs\db_db_general_restore\db_db_general_restore_UNDO.ldf'  
+
+--continue to restore log backups
+restore log [db_db_general_restore] from disk = N'N:\Mounts\Backups\db_db_general_restore\db_db_general_restore_LOG.trn'
+with standby = N'N:\Mounts\Logs\db_db_general_restore\db_db_general_restore_UNDO.ldf'  
+
+--bring database to recovery state
+restore database [db_db_general_restore] with recovery

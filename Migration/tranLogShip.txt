@@ -1,0 +1,315 @@
+--C O N FI G U R E
+
+--take a FULL backup from PRIMARY server
+backup database [db81] to disk = N'N:\Mounts\Backups\db81\db81_FULL.bak' with stats = 10
+
+--restore into SECONDARY server
+use [master]
+go
+RESTORE DATABASE [db81]
+ FROM DISK = 'N:\Mounts\Backups\db81\db81_FULL.bak' WITH  FILE = 1, 
+ MOVE N'db81' TO N'N:\Mounts\Data\db81.mdf',
+ MOVE N'db81_log' TO N'N:\Mounts\Logs\db81_log.ldf',
+ NOUNLOAD,  REPLACE, norecovery, STATS = 10
+GO 
+
+/*
+--*--Perform these actions on the primary server. Repeat this process for the standby database but check the Disable job box for each component. 
+
+1.Open database properties and select Transaction Log Shipping
+2.Check Enable this as a primary database in a log shipping configuration
+3.Click the Backup Settings button
+4.Provide the network path used to access the database log backup folder.
+		Example: \\server_name\N$\Mounts\backups\db81\Tlogs 
+5.Provide the local path used for database log backups
+		Example: N:\Mounts\backups\db81\Tlogs  
+6.Set the retention period for transaction log backups in the Delete files older than field
+7.Change log backup schedule to run every 20 minutes
+8.Click OK when finished
+9.Select Add under Secondary server instances and databases
+10.Click Connect and enter the secondary database server connection string
+11.Ensure you select: No, the secondary database is initialized is checked under the Initialize Secondary Database
+12.Under Copy Files tab, enter the local path on the secondary server to put log backup copies in the Destination folder for copied files. 
+		Example: N:\Mounts\backups\db81\Tlogs 
+13.Under Schedule, change the copy schedule to run every 20 minutes
+14.Select the desired database state under Restore Transaction Log
+15.Change restore schedule to run every 20 minutes
+16.Click Ok
+17.Script out and save the log shipping configuration to a SQL file
+18.Click OK
+*/
+
+
+--PRIMARY server
+
+-- Execute the following statements at the Primary to configure Log Shipping 
+-- for the database [server_name].[db81],
+-- The script needs to be run at the Primary in the context of the [msdb] database.  
+------------------------------------------------------------------------------------- 
+-- Adding the Log Shipping configuration 
+
+-- ****** Begin: Script to be run at Primary: [server_name] ******
+
+
+DECLARE @LS_BackupJobId	AS uniqueidentifier 
+DECLARE @LS_PrimaryId	AS uniqueidentifier 
+DECLARE @SP_Add_RetCode	As int 
+
+
+EXEC @SP_Add_RetCode = master.dbo.sp_add_log_shipping_primary_database 
+		@database = N'db81' 
+		,@backup_directory = N'N:\Mounts\Backups\db81\TLogs' 
+		,@backup_share = N'\\server_name\N$\Mounts\Backups\db81\TLogs' 
+		,@backup_job_name = N'LSBackup_db81' 
+		,@backup_retention_period = 4320
+		,@backup_compression = 2
+		,@backup_threshold = 60 
+		,@threshold_alert_enabled = 1
+		,@history_retention_period = 5760 
+		,@backup_job_id = @LS_BackupJobId OUTPUT 
+		,@primary_id = @LS_PrimaryId OUTPUT 
+		,@overwrite = 1 
+
+
+IF (@@ERROR = 0 AND @SP_Add_RetCode = 0) 
+BEGIN 
+
+DECLARE @LS_BackUpScheduleUID	As uniqueidentifier 
+DECLARE @LS_BackUpScheduleID	AS int 
+
+
+EXEC msdb.dbo.sp_add_schedule 
+		@schedule_name =N'LSBackupSchedule_server_name1' 
+		,@enabled = 1 
+		,@freq_type = 4 
+		,@freq_interval = 1 
+		,@freq_subday_type = 4 
+		,@freq_subday_interval = 20 
+		,@freq_recurrence_factor = 0 
+		,@active_start_date = 20160318 
+		,@active_end_date = 99991231 
+		,@active_start_time = 0 
+		,@active_end_time = 235900 
+		,@schedule_uid = @LS_BackUpScheduleUID OUTPUT 
+		,@schedule_id = @LS_BackUpScheduleID OUTPUT 
+
+EXEC msdb.dbo.sp_attach_schedule 
+		@job_id = @LS_BackupJobId 
+		,@schedule_id = @LS_BackUpScheduleID  
+
+EXEC msdb.dbo.sp_update_job 
+		@job_id = @LS_BackupJobId 
+		,@enabled = 1 
+
+
+END 
+
+
+EXEC master.dbo.sp_add_log_shipping_alert_job 
+
+EXEC master.dbo.sp_add_log_shipping_primary_secondary 
+		@primary_database = N'db81' 
+		,@secondary_server = N'server_name2' 
+		,@secondary_database = N'db81' 
+		,@overwrite = 1 
+
+-- ****** End: Script to be run at Primary: [server_name]  ******
+
+
+--SECONDARY server
+
+-- Execute the following statements at the Secondary to configure Log Shipping 
+-- for the database [server_name2].[db81],
+-- the script needs to be run at the Secondary in the context of the [msdb] database. 
+------------------------------------------------------------------------------------- 
+-- Adding the Log Shipping configuration 
+
+-- ****** Begin: Script to be run at Secondary: [server_name2] ******
+
+
+DECLARE @LS_Secondary__CopyJobId	AS uniqueidentifier 
+DECLARE @LS_Secondary__RestoreJobId	AS uniqueidentifier 
+DECLARE @LS_Secondary__SecondaryId	AS uniqueidentifier 
+DECLARE @LS_Add_RetCode	As int 
+
+
+EXEC @LS_Add_RetCode = master.dbo.sp_add_log_shipping_secondary_primary 
+		@primary_server = N'server_name' 
+		,@primary_database = N'db81' 
+		,@backup_source_directory = N'\\server_name\N$\Mounts\Backups\db81\TLogs' 
+		,@backup_destination_directory = N'N:\Mounts\Backups\db81\TLogs' 
+		,@copy_job_name = N'LSCopy_server_name_db81' 
+		,@restore_job_name = N'LSRestore_server_name_db81' 
+		,@file_retention_period = 4320 
+		,@overwrite = 1 
+		,@copy_job_id = @LS_Secondary__CopyJobId OUTPUT 
+		,@restore_job_id = @LS_Secondary__RestoreJobId OUTPUT 
+		,@secondary_id = @LS_Secondary__SecondaryId OUTPUT 
+
+IF (@@ERROR = 0 AND @LS_Add_RetCode = 0) 
+BEGIN 
+
+DECLARE @LS_SecondaryCopyJobScheduleUID	As uniqueidentifier 
+DECLARE @LS_SecondaryCopyJobScheduleID	AS int 
+
+
+EXEC msdb.dbo.sp_add_schedule 
+		@schedule_name =N'DefaultCopyJobSchedule' 
+		,@enabled = 1 
+		,@freq_type = 4 
+		,@freq_interval = 1 
+		,@freq_subday_type = 4 
+		,@freq_subday_interval = 20 
+		,@freq_recurrence_factor = 0 
+		,@active_start_date = 20160318 
+		,@active_end_date = 99991231 
+		,@active_start_time = 0 
+		,@active_end_time = 235900 
+		,@schedule_uid = @LS_SecondaryCopyJobScheduleUID OUTPUT 
+		,@schedule_id = @LS_SecondaryCopyJobScheduleID OUTPUT 
+
+EXEC msdb.dbo.sp_attach_schedule 
+		@job_id = @LS_Secondary__CopyJobId 
+		,@schedule_id = @LS_SecondaryCopyJobScheduleID  
+
+DECLARE @LS_SecondaryRestoreJobScheduleUID	As uniqueidentifier 
+DECLARE @LS_SecondaryRestoreJobScheduleID	AS int 
+
+
+EXEC msdb.dbo.sp_add_schedule 
+		@schedule_name =N'DefaultRestoreJobSchedule' 
+		,@enabled = 1 
+		,@freq_type = 4 
+		,@freq_interval = 1 
+		,@freq_subday_type = 4 
+		,@freq_subday_interval = 20 
+		,@freq_recurrence_factor = 0 
+		,@active_start_date = 20160318 
+		,@active_end_date = 99991231 
+		,@active_start_time = 0 
+		,@active_end_time = 235900 
+		,@schedule_uid = @LS_SecondaryRestoreJobScheduleUID OUTPUT 
+		,@schedule_id = @LS_SecondaryRestoreJobScheduleID OUTPUT 
+
+EXEC msdb.dbo.sp_attach_schedule 
+		@job_id = @LS_Secondary__RestoreJobId 
+		,@schedule_id = @LS_SecondaryRestoreJobScheduleID  
+
+
+END 
+
+
+DECLARE @LS_Add_RetCode2	As int 
+
+
+IF (@@ERROR = 0 AND @LS_Add_RetCode = 0) 
+BEGIN 
+
+EXEC @LS_Add_RetCode2 = master.dbo.sp_add_log_shipping_secondary_database 
+		@secondary_database = N'db81' 
+		,@primary_server = N'server_name' 
+		,@primary_database = N'db81' 
+		,@restore_delay = 0 
+		,@restore_mode = 1 
+		,@disconnect_users	= 1 
+		,@restore_threshold = 45   
+		,@threshold_alert_enabled = 1 
+		,@history_retention_period	= 5760 
+		,@overwrite = 1 
+
+END 
+
+
+IF (@@error = 0 AND @LS_Add_RetCode = 0) 
+BEGIN 
+
+EXEC msdb.dbo.sp_update_job 
+		@job_id = @LS_Secondary__CopyJobId 
+		,@enabled = 1 
+
+EXEC msdb.dbo.sp_update_job 
+		@job_id = @LS_Secondary__RestoreJobId 
+		,@enabled = 1 
+
+END 
+
+
+-- ****** End: Script to be run at Secondary: [server_name2] ******
+
+
+-----------------------------------------------------------------------------
+
+--T R O U B L E S H O O T I N G
+
+/*
+
+msdb.dbo.log_shipping_monitor_error_detail
+The tables related to history and monitoring are also used at the primary server 
+and the secondary servers. log_shipping_monitor_error_detail (Transact-SQL)
+
+msdb.dbo.log_shipping_monitor_history_detail
+The tables related to history and monitoring are also used at the primary server 
+and the secondary servers. log_shipping_monitor_error_detail (Transact-SQL)
+*/
+
+--F A I L O V E R (P L A N N E D)
+
+/*
+
+1.Disable all log shipping and maintenance jobs
+--Generates scripts to DISABLE all Restore jobs:
+*/
+select 'exec msdb.dbo.sp_update_job @job_name = ''' + name + ''', @enabled = 0' from msdb.dbo.sysjobs where name like '%LSRestore%' or name like ‘%LSCopy%’
+  
+--Generates scripts to ENABLE all Restore jobs:
+select 'exec msdb.dbo.sp_update_job @job_name = ''' + name + ''', @enabled = 1' from msdb.dbo.sysjobs where name like '%LSRestore%' or name like ‘%LSCopy%’ 
+
+/*
+2.Execute the following statement to generate the appropriate log backup
+/*RUN THIS ON THE PRIMARY SERVER*/ 
+*/
+USE msdb; 
+SET TRAN ISOLATION LEVEL READ UNCOMMITTED;
+DECLARE @current_date NVARCHAR(48); DECLARE @backup_date NVARCHAR(48); DECLARE @last_backup_file NVARCHAR(256);
+SELECT @last_backup_file=last_backup_file FROM dbo.log_shipping_monitor_primary; 
+SET @current_date = SUBSTRING(REPLACE(REPLACE(REPLACE(CONVERT(NVARCHAR,GETUTCDATE(),121),' ',''),':',''),'-',''),0,15) 
+SET @backup_date = SUBSTRING(@last_backup_file,CHARINDEX('_',@last_backup_file) + 1,14)
+SELECT         primary_server,         primary_database,         CASE                 
+WHEN CAST(@current_date AS BIGINT) > CAST(@backup_date AS BIGINT) 
+THEN                         'BACKUP LOG ' + primary_database + ' TO DISK=N''' +                         
+REPLACE(last_backup_file,REVERSE(SUBSTRING(REVERSE(last_backup_file),0,19)),SUBSTRING(@current_date,0,15) + '.trn') +
+                         ''' WITH NORECOVERY;'                 
+ELSE                         
+'New backup command is too early. Please run again in a few minutes.'         
+END AS [backup_cmd] FROM dbo.log_shipping_monitor_primary ; 
+
+/*
+3.Perform the final log backup on the primary server
+4.Manually execute the copy jobs
+5.Manually execute the restore jobs
+6.Restore the secondary databases with recovery
+7.WAIT FOR APPLICATION TESTING TO COMPLETE
+8.Enable log backup jobs new primary
+9.Enable log copy and restore jobs on new secondary
+10.Execute the following procedures as directed
+*/
+
+-- Statement to execute on the new primary server 
+USE msdb 
+GO 
+EXEC master.dbo.sp_change_log_shipping_secondary_database @secondary_database = N'database_name', @threshold_alert_enabled = 0; 
+GO 
+
+-- Statement to execute on the new secondary server
+USE msdb
+GO
+EXEC master.dbo.sp_change_log_shipping_primary_database @database=N'database_name', @threshold_alert_enabled = 0;
+GO 
+
+--F A I L O V E R (U N P L A N N E D) 
+/*
+Restore all log shipped databases on the secondary server with recovery.
+Change the owner on these databases to SA.
+Enable service broker for any databases that require it and open any necessary encryption keys.
+Enable necessary application jobs
+*/

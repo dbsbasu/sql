@@ -1,0 +1,29 @@
+--restore: general notes
+questions. how to know which ful backup is the base for a specific diff backup?
+-or- which diff backups can be restored based off of the full backup?
+answer. database_backup_lsn of a diff backup will match the checkpoint_lsn of its 
+base full backup.
+
+for that matter, database_backup_lsn of a diff and tlog backup will match 
+checkpoint_lsn of its base full backup.
+
+question. how to recognize the right tran log backup that should be applied 
+after a diff (or full) bkup?
+answer. look for the tran log bkup for which the first and last lsn covers 
+the value of the last lsn of the diff backup in question.
+in other words, the last lsn of the diff (or full) backup should fall between 
+first and last lsn of the log backup.
+
+question. how to ensure that we are applying the right tran log backups 
+one after the other?
+answer. the last lsn of the previous log bkup should be the first lsn of 
+the next log bkup.
+
+first lsn is where the corresponding backup starts. 
+(last lsn - 1) is included in the said bkup.
+
+if you have a copy_only full backup taken, database_backup_lsn of the subsequent 
+diff backups would still point to the checkpoint_lsn of the last regular full backup. 
+copy only backup does not reset the diff bit map page for an extent 
+and that is how the copy_only full bkup does not interrup the following diff bkups. 
+the diff bkups still continue to point to its original base regular full backup.

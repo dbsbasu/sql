@@ -1,0 +1,101 @@
+--> 1. set firewall with port 5022 (or of any other choice, better not use the default 5022)
+--> 2. perform an [ ipconfig /all ] on principal and mirror partner. get host name and Primary Dns Suffix
+--> 3. partner tcp = <host name>.<Primary Dns Suffix>:port. example: TCP://server.domain.url.com:5022
+--> 4. permissions: on both servers, principal and mirror
+--add and grant permissions to the login that will be used for mirroring 
+--grant CREATE ENDPOINT, ALTER DATABASE to [login];
+
+--OR use sql service account: get sql service account 
+--select * from sys.dm_server_services
+
+--> 5. principal server: stop tran log backup job
+
+--> 6. principal server: create endpoint using the port setup on firewall
+use [master]
+go
+--drop endpoint Endpoint_Mirroring
+create endpoint Endpoint_Mirroring
+    state=started 
+    as tcp (listener_port=5022) 
+    for database_mirroring (role=partner)
+
+--7. verify endpoints and ports
+select * from sys.tcp_endpoints;
+
+--> 8. principal server: set database in full recovery mode
+alter database [GlassTestDB] set recovery full with NO_WAIT
+
+--> 9. principal server: get a backup
+backup database [GlassTestDB] to disk = N'N:\Mounts\Backups\GlassTestDB.bak' 
+with compression, noformat, noinit, name =N'GlassTestDB-Full Database Backup', 
+skip, norewind, nounload, stats = 10
+
+--> 10. principal server: 
+backup log (tail-log)
+backup log [GlassTestDB] to disk = N'N:\Mounts\Backups\GlassTestDB.trn' 
+with name = N'GlassTestDB- log Backup' 
+
+--CHANGE SERVER : mirror partner server: 
+/*
+--> 11. mirror partner server: create endpoint using the port setup on firewall
+--drop endpoint Endpoint_Mirroring
+create endpoint Endpoint_Mirroring
+    state=started 
+    as tcp (listener_port=5022) 
+    for database_mirroring (role=partner)
+
+--> 12. mirror partner server: verify endpoints and ports--verify
+select * from sys.tcp_endpoints;
+
+--> 13. mirror partner server: restore database
+restore database [GlassTestDB]
+ from disk = N'\\my_server\N$\Mounts\Backups\GlassTestDB.bak'
+ with  file = 1, 
+ move N'GlassTestDB' TO N'N:\Mounts\Data\GlassTestDB.mdf',
+ move N'GlassTestDB_log' TO N'N:\Mounts\Logs\GlassTestDB_log.ldf',
+ norecovery, nounload,  replace,  stats = 10;
+--> 14. mirror partner server: restore log
+
+restore log [GlassTestDB] from disk = N'\\my_server\N$\Mounts\Backups\GlassTestDB.trn' 
+with norecovery;
+--> 15. mirror partner server: setup mirroring : 1
+
+alter database [GlassTestDB] set partner = 'TCP://my_server.domain.url.com:5022';
+*/
+
+--CHANGE SERVER : principal server: 
+--> 16. principal server: setup mirroring : 2
+
+alter database [GlassTestDB] 
+set partner = 'TCP://my_server2.domain.url.com:5022';
+
+--> 17. verify mirror partner role: both servers, principal and mirror
+
+select mirroring_state_desc, 
+mirroring_role_desc, mirroring_safety_level_desc, mirroring_partner_name, mirroring_partner_instance
+from sys.database_mirroring dm1
+inner join sys.databases d1 
+on d1.database_id = dm1.database_id
+where d1.name = 'GlassTestDB'
+
+
+--> 99. Additional Administration
+/*
+--> 991. create a snapshot database off of the mirror partner database: mirror partner server
+--drop database GlassTestDB_snapshot
+CREATE DATABASE GlassTestDB_snapshot ON
+(NAME = GlassTestDB, FILENAME = 'N:\Mounts\Data\GlassTestDB.ss'),
+(NAME = GlassTestDB_02, FILENAME = 'N:\Mounts\Data\GlassTestDB_02.ss' ) 
+AS SNAPSHOT OF GlassTestDB;
+GO
+
+--> 992. break mirroring: mirror partner server
+--alter database GlassTestDB set partner off
+
+
+--> 993. failover (switch partner roles) : principal server
+--alter database GlassTestDB set partner failover
+*/
+
+
+

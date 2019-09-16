@@ -1,0 +1,10 @@
+EXEC sp_msForEachDB ' 
+if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'',''[dbaUtils]'') return
+use [?]
+declare @target_instance varchar(80);
+set @target_instance = ''SCMSSd2h'';
+declare @sqltext varchar(8000)
+set @sqltext = ''BACKUP DATABASE [''+''?''+''] TO DISK = N''''\\xxx\sqlbkup01\''+@target_instance+''\Data\''+''?''+''.bak'''' WITH COMPRESSION, COPY_ONLY, NOFORMAT, NOINIT,NAME =N''''''+''?''+''-Full Database   Backup'''', SKIP, NOREWIND, NOUNLOAD,  STATS = 10'';
+print (@sqltext);
+'
+

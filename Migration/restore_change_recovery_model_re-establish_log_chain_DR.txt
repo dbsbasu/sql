@@ -1,0 +1,88 @@
+use [db_lsn_test1]
+go
+--1. create database db_lsn_test1 with full recovery
+
+--2. create table
+
+--2. take a full backup (only after this our database is in full recovery mode, factually)
+backup database [db_lsn_test1] to disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_Full.bak' 
+
+--3. restore a copy as db_lsn_test1_DR with standby (recovery would also work)
+restore database [db_lsn_test1_DR] from disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_Full.bak'
+with file = 1, 
+move N'db_lsn_test1' to N'N:\Mounts\Data\db_lsn_test1_DR.mdf',
+move N'db_lsn_test1_log' to N'N:\Mounts\Logs\db_lsn_test1_DR_log.ldf',
+standby = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_DR_UNDO.ldf'  
+
+--4. add data (BEFORE breaking log chain)
+
+--5. take a log backup
+backup log [db_lsn_test1] to disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_log01.trn' 
+
+--6. restore the log backup and verify the contents of the table
+restore log [db_lsn_test1_DR] from disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_log01.trn'
+with standby = N'N:\Mounts\Backups\db_lsn_test1_DR_UNDO.ldf'  
+
+--7. change db_lsn_test1 from full to simple recovery
+alter database [db_lsn_test1] set recovery simple with NO_WAIT
+
+--7a. issue a checkpoint to make VLFs inactive and ready for re-use
+checkpoint
+
+--7b. shrink log file, favoring removal of VLFs
+dbcc shrinkfile (N'db_lsn_test1_log' , 10)
+
+--8. add more data (AFTER breaking log chain)
+
+--9. change db_lsn_test1 from simple to full recovery
+alter database [db_lsn_test1] set recovery full with NO_WAIT
+
+--10. take a diff backup 
+backup database [db_lsn_test1] to disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_diff02.bak' with differential
+
+--11. re-establish log chain by restoring a diff backup
+restore database [db_lsn_test1_DR] from disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_diff02.bak' 
+with standby = N'N:\Mounts\Backups\db_lsn_test1_DR_UNDO.ldf'  
+
+--12. add more data  (log chain RE-ESTABLISHED)
+
+--13. take log backup
+backup log [db_lsn_test1] to disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_log02.trn' 
+
+--14. continue to restore log backups
+restore log [db_lsn_test1_DR] from disk = N'N:\Mounts\Backups\db_lsn_test1\db_lsn_test1_log02.trn' 
+with standby = N'N:\Mounts\Backups\db_lsn_test1_DR_UNDO.ldf'  
+
+
+
+
+/*
+create table dbo.testData (
+ id int not null
+,fillData varchar(80) null
+,recAddDatetime datetime2 not null constraint DF_recAddDatetime default sysdatetime()
+) on [primary];
+create unique clustered index uq_testdata on dbo.testdata
+(id asc) with (pad_index = on, fillfactor = 100) on [primary];
+
+
+set nocount on;
+declare @id int = 0, @iterate int = 0, @addrows int;
+set @addrows = 100 --> set number of inserts
+select @id = 1 + coalesce(max(id),0) from dbo.testData;
+--set @id = 51 --> uncomment to override id value
+set @iterate = @id + @addrows - 1;
+select 'next id starts at: ' + cast (@id as varchar(10)) 
+          + ' / ends at: '  + cast (@iterate as varchar(10)) 
+		  + ' / adding ' + cast(@addrows as varchar(10)) + ' rows ';
+
+while @id <= @iterate
+begin
+--insert into dbo.testData (id, fillData) values (@id, replicate('BEFORE breaking log chain',1))
+--insert into dbo.testData (id, fillData) values (@id, replicate('AFTER breaking log chain',1))
+insert into dbo.testData (id, fillData) values (@id, replicate('log chain RE-ESTABLISHED',1))
+set @id = @id + 1;
+end
+*/
+
+

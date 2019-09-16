@@ -1,0 +1,56 @@
+--log file is lost or damaged or corrupt
+--prep step (USE TEST SERVER ONLY)
+--create db_hack_tlog. simple recovery is ok
+CREATE DATABASE [db_hack_tlog]
+ CONTAINMENT = NONE
+ ON  PRIMARY 
+( NAME = N'db_hack_tlog', FILENAME = N'N:\Mounts\Data\db_hack_tlog\db_hack_tlog.mdf' , SIZE = 4096KB , FILEGROWTH = 0)
+ LOG ON 
+( NAME = N'db_hack_tlog_log', FILENAME = N'N:\Mounts\Logs\db_hack_tlog\db_hack_tlog_log.ldf' , SIZE = 3072KB , FILEGROWTH = 0)
+GO
+alter authorization on database::db_hack_tlog to sa
+
+--assume log file is damaged
+
+--detach database. YOU MAY NEED TO INHERIT THE FILE PERMISSIONS FROM THE PARENT
+USE [master]
+GO
+EXEC master.dbo.sp_detach_db @dbname = N'db_hack_tlog'
+GO
+
+--rename tlog file db_hack_tlog_log.ldf to db_hack_tlog_log_damaged_save.ldf
+
+--create a new db with same name and file structure as db_hack_tlog BUT place the files at a separate location
+CREATE DATABASE [db_hack_tlog]
+ CONTAINMENT = NONE
+ ON  PRIMARY 
+( NAME = N'db_hack_tlog', FILENAME = N'N:\Mounts\Data\db_hack_tlog\db_hack_tlog_dummy.mdf' , SIZE = 4096KB , FILEGROWTH = 0)
+ LOG ON 
+( NAME = N'db_hack_tlog_log', FILENAME = N'N:\Mounts\Logs\db_hack_tlog\db_hack_tlog_log.ldf' , SIZE = 3072KB , FILEGROWTH = 0)
+GO
+alter authorization on database::db_hack_tlog to sa
+
+--set newly created db offline
+ALTER DATABASE  db_hack_tlog  SET  OFFLINE  WITH ROLLBACK IMMEDIATE
+
+--alter newly created database to set the new file for the data file(s)
+ALTER DATABASE db_hack_tlog MODIFY FILE (NAME = db_hack_tlog, FILENAME = N'N:\Mounts\Data\db_hack_tlog\db_hack_tlog.mdf');
+
+--bring database online. YOU WILL SEE ERRORS BUT ACTUALLY IT WILL BE BROUGHT ONLINE
+USE [master]
+GO
+ALTER DATABASE  db_hack_tlog  SET  ONLINE
+
+--verify status
+select databasepropertyex (N'db_hack_tlog', N'status'); --SUSPECT
+select name, state_desc from sys.databases d1 where d1.name = 'db_hack_tlog' --RECOVERY_PENDING
+
+--set emergency, single user, allow_dataloss, finally multi-user
+ALTER DATABASE  db_hack_tlog  SET  EMERGENCY
+ALTER DATABASE  db_hack_tlog   SET SINGLE_USER  WITH ROLLBACK IMMEDIATE
+DBCC CHECKDB (db_hack_tlog, REPAIR_ALLOW_DATA_LOSS) WITH NO_INFOMSGS, ALL_ERRORMSGS;
+ALTER DATABASE db_hack_tlog SET MULTI_USER
+
+
+--> cleanup later the new mdf file db_hack_tlog\db_hack_tlog_dummy.mdf
+--> cleanup item or appropriate treatment for db_hack_tlog_log_damaged_save.ldf
