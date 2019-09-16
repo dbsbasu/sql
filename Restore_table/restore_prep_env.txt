@@ -1,0 +1,187 @@
+--prepare test data / env
+--make sure tlog bkup job has been disabled during this test
+--keep three query windows open. run this script in one.
+--use the second one to select data from table when populated (commented out in this script as: -->select tables)
+--on the third window, run the 2 backup statements (commented out in this script as: -->run backup in a separate window)
+--test: delete in 3 segments within one transaction and take tlog backup after each segment finishes. 
+
+set nocount on;
+CREATE DATABASE [BlueDB]
+ CONTAINMENT = NONE
+ ON  PRIMARY 
+( NAME = N'BlueDB', FILENAME = N'N:\Mounts\Data\BlueDB\BlueDB.mdf' , SIZE = 10240KB , FILEGROWTH = 0)
+ LOG ON 
+( NAME = N'BlueDB_log', FILENAME = N'N:\Mounts\Logs\BlueDB\BlueDB_log.ldf' , SIZE = 10240KB , FILEGROWTH = 0)
+GO
+alter authorization on database::BlueDB to sa
+GO
+USE [BlueDB]
+GO
+ALTER DATABASE [BlueDB] SET RECOVERY SIMPLE 
+GO
+
+--creating table
+CREATE TABLE [dbo].[SorryTable](
+	idINT int IDENTITY(1,1) NOT NULL,
+	recGUID uniqueidentifier not null constraint df_recGUID_SorryTable default newsequentialID(),
+	idTinyInt tinyint NULL,
+	idSmallInt smallint NULL,
+	idBigInt bigint NULL,
+	codeChar char(10) NULL,
+	amountDecimal decimal(10,5) NULL,
+	priceMoney money NULL,
+	descVarChar varchar(80) NULL,
+	recAddTimestamp datetime not null constraint df_recAddTimestamp_SorryTable default getdate()
+--,CONSTRAINT [PK_SorryTable] PRIMARY KEY CLUSTERED 
+--(
+--	[idINT] ASC
+--)WITH (PAD_INDEX = ON, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+declare @addRec int = 30;
+declare @iterate int = 1;
+declare @codeChar char(10) = '';
+declare @descVarChar varchar(80) = '';
+while @iterate <= @addRec
+begin
+	set @codeChar = 'ABC_'+cast(@iterate as varchar(10))
+	set @descVarChar = 'XYZ_whatever_'+cast(@iterate as varchar(10))
+	INSERT INTO [dbo].[SorryTable] (idTinyInt, idSmallInt, idBigInt, codeChar, amountDecimal, priceMoney, descVarChar) 
+	values (1, @iterate+10, @iterate*10, @codeChar, @iterate*1.0001, @iterate*1.25, @descVarChar)   
+	set @iterate = @iterate + 1;
+end
+
+CREATE TABLE [dbo].[whoCares](
+	id1 int IDENTITY(1,1) NOT NULL,
+	comment1 varchar(43) null,
+	Timestamp1 datetime not null constraint Timestamp1 default getdate(),
+) ON [PRIMARY]
+GO
+
+--set database in FULL Recovery, of course, take a full backup and if you want, a tran log backup too
+waitfor delay '0:00:05'
+ALTER DATABASE [BlueDB] SET RECOVERY FULL 
+GO
+waitfor delay '0:00:05'
+BACKUP DATABASE [BlueDB] 
+TO DISK = N'N:\Mounts\Backups\BlueDB\BlueDB_Full.bak' 
+WITH COMPRESSION, NOFORMAT, NOINIT, NAME =N'Full DB Backup', SKIP, NOREWIND, NOUNLOAD,  STATS = 10;
+BACKUP LOG [BlueDB] TO DISK = N'N:\Mounts\Backups\BlueDB\BlueDB_tlog_0.trn';
+
+/*
+-->select tables
+select * from dbo.SorryTable order by idINT asc;
+*/
+
+--------------------TEST BEGINS-- scenario: delete row tran spills over multiple tran log backups
+--begin explicit tran, add data, backup tlog, issue checkpoint, backup tlog, commit tran, backup tlog, issue checkpoint, backup tlog
+begin tran test1
+
+DELETE from [dbo].[SorryTable] where idINT between 1 and 5;
+insert into [dbo].[whoCares] (comment1) values ('first step insert 1 row'); 
+
+waitfor delay '0:00:15'
+/*
+-->run backup in a separate window
+BACKUP LOG [BlueDB] TO DISK = N'N:\Mounts\Backups\BlueDB\BlueDB_tlog_1.trn';
+*/
+
+DELETE from [dbo].[SorryTable] where idINT between 6 and 15;
+update [dbo].[whoCares] set comment1 = 'second step update the row';
+checkpoint;
+
+waitfor delay '0:00:15'
+/*
+-->run backup in a separate window
+BACKUP LOG [BlueDB] TO DISK = N'N:\Mounts\Backups\BlueDB\BlueDB_tlog_2.trn';
+*/
+
+DELETE from [dbo].[SorryTable] where idINT between 16 and 30;
+delete from [dbo].[whoCares]; 
+commit tran test1;
+
+BACKUP LOG [BlueDB] TO DISK = N'N:\Mounts\Backups\BlueDB\BlueDB_tlog_3.trn';
+
+/*
+-->select tables
+select * from dbo.SorryTable order by idINT asc;
+*/
+
+--re-enable tlog backup now
+
+--------------------TEST ENDS
+
+/*
+--set database single_user and drop 
+use [master]
+go
+ALTER DATABASE [BlueDB] SET  SINGLE_USER WITH ROLLBACK IMMEDIATE
+GO
+DROP DATABASE [BlueDB]
+GO
+
+--continue to work on all data types including blobs, as listed by below query
+SELECT name, xtype, [length], * FROM systypes st ORDER BY st.name
+
+
+--log backup time stamp
+declare @logBackupTime varchar(23);
+select @logBackupTime = replace(replace(replace(cast([Begin Time] as varchar),':','_'),'/','_'),' ','T') 
+FROM
+    fn_dump_dblog (
+        NULL, NULL, N'DISK', 1, N'N:\Mounts\Backups\BlueDB\BlueDB_tlog_1.trn',
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT,
+        DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT, DEFAULT)
+where
+[Xact Type] = 1 and [Transaction Name] = 'Backup:CommitLogArchivePoint'
+
+select @logBackupTime
+
+
+--truncate table test
+--creating table
+CREATE TABLE [dbo].[truncTable](
+	idINT int IDENTITY(1,1) NOT NULL,
+	recGUID uniqueidentifier not null constraint df_recGUID_truncTable default newsequentialID(),
+	idTinyInt tinyint NULL,
+	idSmallInt smallint NULL,
+	idBigInt bigint NULL,
+	codeChar char(10) NULL,
+	amountDecimal decimal(10,5) NULL,
+	priceMoney money NULL,
+	descVarChar varchar(80) NULL,
+	recAddTimestamp datetime not null constraint df_recAddTimestamp_truncTable default getdate()
+--,CONSTRAINT [PK_truncTable] PRIMARY KEY CLUSTERED 
+--(
+--	[idINT] ASC
+--)WITH (PAD_INDEX = ON, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON, FILLFACTOR = 90) ON [PRIMARY]
+) ON [PRIMARY]
+GO
+
+declare @addRec int = 50;
+declare @iterate int = 31;
+declare @codeChar char(10) = '';
+declare @descVarChar varchar(80) = '';
+while @iterate <= @addRec
+begin
+	set @codeChar = 'ABC_'+cast(@iterate as varchar(10))
+	set @descVarChar = 'XYZ_trunc_'+cast(@iterate as varchar(10))
+	INSERT INTO [dbo].[truncTable] (idTinyInt, idSmallInt, idBigInt, codeChar, amountDecimal, priceMoney, descVarChar) 
+	values (1, @iterate+10, @iterate*10, @codeChar, @iterate*1.0001, @iterate*1.25, @descVarChar)   
+	set @iterate = @iterate + 1;
+end
+
+-->> select * from dbo.truncTable order by idINT asc;
+
+truncate table [dbo].[truncTable];
+
+*/
+
