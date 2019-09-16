@@ -1,0 +1,16 @@
+SELECT CHAR(13) + CHAR(10)
++ CASE WHEN deqs.statement_start_offset = 0
+AND deqs.statement_end_offset = -1
+THEN '-- see objectText column--'
+ELSE '-- query --' + CHAR(13) + CHAR(10)
++ SUBSTRING(execText.text, deqs.statement_start_offset / 2,
+( ( CASE WHEN deqs.statement_end_offset = -1
+THEN DATALENGTH(execText.text)
+ELSE deqs.statement_end_offset
+END ) - deqs.statement_start_offset ) / 2)
+END AS queryText ,
+deqp.query_plan
+FROM sys.dm_exec_query_stats deqs
+CROSS APPLY sys.dm_exec_sql_text(deqs.plan_handle) AS execText
+CROSS APPLY sys.dm_exec_query_plan(deqs.plan_handle) deqp
+WHERE execText.text LIKE 'CREATE PROCEDURE ShowQueryText%'

@@ -1,0 +1,494 @@
+--total wait times as well as resource and signal wait times, filters out many benign waits, and performs some math to present very clearly the most significant waits, historically, on the instance
+
+WITH [Waits] AS    
+(SELECT        [wait_type],        
+[wait_time_ms] / 1000.0 AS [WaitS],        
+([wait_time_ms] - [signal_wait_time_ms]) / 1000.0 AS [ResourceS],        
+[signal_wait_time_ms] / 1000.0 AS [SignalS],        
+[waiting_tasks_count] AS [WaitCount],        
+100.0 * [wait_time_ms] / SUM ([wait_time_ms]) OVER() AS [Percentage],        
+ROW_NUMBER() OVER(ORDER BY [wait_time_ms] DESC) AS [RowNum]    
+FROM sys.dm_os_wait_stats    
+WHERE [wait_type] NOT IN (        N'BROKER_EVENTHANDLER',             N'BROKER_RECEIVE_WAITFOR',        N'BROKER_TASK_STOP',                N'BROKER_TO_FLUSH',        N'BROKER_TRANSMITTER',              N'CHECKPOINT_QUEUE',        N'CHKPT',                           N'CLR_AUTO_EVENT',        N'CLR_MANUAL_EVENT',                N'CLR_SEMAPHORE',        N'DBMIRROR_DBM_EVENT',              N'DBMIRROR_EVENTS_QUEUE',        N'DBMIRROR_WORKER_QUEUE',           N'DBMIRRORING_CMD',        N'DIRTY_PAGE_POLL',                 N'DISPATCHER_QUEUE_SEMAPHORE',        N'EXECSYNC',                        N'FSAGENT',        N'FT_IFTS_SCHEDULER_IDLE_WAIT',     N'FT_IFTSHC_MUTEX',        N'HADR_CLUSAPI_CALL',               N'HADR_FILESTREAM_IOMGR_IOCOMPLETION',        N'HADR_LOGCAPTURE_WAIT',            N'HADR_NOTIFICATION_DEQUEUE',        N'HADR_TIMER_TASK',                 N'HADR_WORK_QUEUE',        N'KSOURCE_WAKEUP',                  N'LAZYWRITER_SLEEP',        N'LOGMGR_QUEUE',                    N'ONDEMAND_TASK_QUEUE',        N'PWAIT_ALL_COMPONENTS_INITIALIZED',        N'QDS_PERSIST_TASK_MAIN_LOOP_SLEEP',        N'QDS_CLEANUP_STALE_QUERIES_TASK_MAIN_LOOP_SLEEP',        N'REQUEST_FOR_DEADLOCK_SEARCH',     N'RESOURCE_QUEUE',        N'SERVER_IDLE_CHECK',               N'SLEEP_BPOOL_FLUSH',        N'SLEEP_DBSTARTUP',                 N'SLEEP_DCOMSTARTUP',        N'SLEEP_MASTERDBREADY',             N'SLEEP_MASTERMDREADY',        N'SLEEP_MASTERUPGRADED',            N'SLEEP_MSDBSTARTUP',        N'SLEEP_SYSTEMTASK',                N'SLEEP_TASK',        N'SLEEP_TEMPDBSTARTUP',             N'SNI_HTTP_ACCEPT',        N'SP_SERVER_DIAGNOSTICS_SLEEP',     N'SQLTRACE_BUFFER_FLUSH',        N'SQLTRACE_INCREMENTAL_FLUSH_SLEEP',        N'SQLTRACE_WAIT_ENTRIES',           N'WAIT_FOR_RESULTS',        N'WAITFOR',                         N'WAITFOR_TASKSHUTDOWN',        N'WAIT_XTP_HOST_WAIT',              N'WAIT_XTP_OFFLINE_CKPT_NEW_LOG',        N'WAIT_XTP_CKPT_CLOSE',             N'XE_DISPATCHER_JOIN',        N'XE_DISPATCHER_WAIT',              N'XE_TIMER_EVENT')    AND [waiting_tasks_count] > 0 )
+SELECT    MAX ([W1].[wait_type]) AS [WaitType],    
+CAST (MAX ([W1].[WaitS]) AS DECIMAL (16,2)) AS [Wait_S],   
+CAST (MAX ([W1].[ResourceS]) AS DECIMAL (16,2)) AS [Resource_S],    
+CAST (MAX ([W1].[SignalS]) AS DECIMAL (16,2)) AS [Signal_S],    
+MAX ([W1].[WaitCount]) AS [WaitCount],    
+CAST (MAX ([W1].[Percentage]) AS DECIMAL (5,2)) AS [Percentage],    
+CAST ((MAX ([W1].[WaitS]) / MAX ([W1].[WaitCount])) AS DECIMAL (16,4)) AS [AvgWait_S],    
+CAST ((MAX ([W1].[ResourceS]) / MAX ([W1].[WaitCount])) AS DECIMAL (16,4)) AS [AvgRes_S],    
+CAST ((MAX ([W1].[SignalS]) / MAX ([W1].[WaitCount])) AS DECIMAL (16,4)) AS [AvgSig_S]
+FROM [Waits] AS [W1]
+INNER JOIN [Waits] AS [W2]    ON [W2].[RowNum] <= [W1].[RowNum]GROUP BY [W1].[RowNum]HAVING SUM ([W2].[Percentage]) - MAX ([W1].[Percentage]) < 95; -- percentage threshold
+GO
+
+
+
+-- system session waits
+SELECT DISTINCT
+wt.wait_type
+FROM sys.dm_os_waiting_tasks AS wt
+JOIN sys.dm_exec_sessions AS s ON wt.session_id = s.session_id
+WHERE s.is_user_process = 0
+
+--top ten cumulative wait events.
+SELECT TOP 10
+wait_type ,
+max_wait_time_ms wait_time_ms ,
+signal_wait_time_ms ,
+wait_time_ms - signal_wait_time_ms AS resource_wait_time_ms ,
+convert(decimal(12,2),round(100.0 * wait_time_ms / SUM(wait_time_ms) OVER ( ),2)) AS percent_total_waits ,
+convert(decimal(12,2),round(100.0 * signal_wait_time_ms / SUM(signal_wait_time_ms) OVER ( ),2)) AS percent_total_signal_waits ,
+convert(decimal(12,2),round(100.0 * ( wait_time_ms - signal_wait_time_ms ) / SUM(wait_time_ms) OVER ( ),2)) AS percent_total_resource_waits
+FROM sys.dm_os_wait_stats
+WHERE wait_time_ms > 0 -- remove zero wait_time
+AND wait_type NOT IN -- filter out additional irrelevant waits
+( 'SLEEP_TASK', 'BROKER_TASK_STOP', 'BROKER_TO_FLUSH',
+'SQLTRACE_BUFFER_FLUSH','CLR_AUTO_EVENT', 'CLR_MANUAL_EVENT',
+'LAZYWRITER_SLEEP', 'SLEEP_SYSTEMTASK', 'SLEEP_BPOOL_FLUSH',
+'BROKER_EVENTHANDLER', 'XE_DISPATCHER_WAIT', 'FT_IFTSHC_MUTEX',
+'CHECKPOINT_QUEUE', 'FT_IFTS_SCHEDULER_IDLE_WAIT',
+'BROKER_TRANSMITTER', 'FT_IFTSHC_MUTEX', 'KSOURCE_WAKEUP',
+'LOGMGR_QUEUE', 'ONDEMAND_TASK_QUEUE',
+'REQUEST_FOR_DEADLOCK_SEARCH', 'XE_TIMER_EVENT', 'BAD_PAGE_PROCESS',
+'DBMIRROR_EVENTS_QUEUE', 'BROKER_RECEIVE_WAITFOR',
+'PREEMPTIVE_OS_GETPROCADDRESS', 'PREEMPTIVE_OS_AUTHENTICATIONOPS',
+'WAITFOR', 'DISPATCHER_QUEUE_SEMAPHORE', 'XE_DISPATCHER_JOIN',
+'RESOURCE_QUEUE' )
+ORDER BY wait_time_ms DESC
+
+
+-- clearing server wait stats : GIVE IT A THOUGHT
+----DBCC SQLPERF('sys.dm_os_wait_stats', clear)
+
+
+--Virtual file statistics.
+SELECT DB_NAME(vfs.database_id) AS database_name ,
+vfs.database_id ,
+vfs.FILE_ID ,
+io_stall_read_ms / NULLIF(num_of_reads, 0) AS avg_read_latency ,
+io_stall_write_ms / NULLIF(num_of_writes, 0)
+AS avg_write_latency ,
+io_stall / NULLIF(num_of_reads + num_of_writes, 0)
+AS avg_total_latency ,
+num_of_bytes_read / NULLIF(num_of_reads, 0)
+AS avg_bytes_per_read ,
+num_of_bytes_written / NULLIF(num_of_writes, 0)
+AS avg_bytes_per_write ,
+vfs.io_stall ,
+vfs.num_of_reads ,
+vfs.num_of_bytes_read ,
+vfs.io_stall_read_ms ,
+vfs.num_of_writes ,
+vfs.num_of_bytes_written ,
+vfs.io_stall_write_ms ,
+(size_on_disk_bytes / 1024 / 1024) AS size_on_disk_mbytes ,
+physical_name
+FROM sys.dm_io_virtual_file_stats(NULL, NULL) AS vfs
+JOIN sys.master_files AS mf ON vfs.database_id = mf.database_id
+AND vfs.FILE_ID = mf.FILE_ID
+ORDER BY avg_total_latency DESC
+
+--performance counters
+DECLARE @CounterPrefix NVARCHAR(30)
+SET @CounterPrefix = CASE WHEN @@SERVICENAME = 'MSSQLSERVER'
+THEN 'SQLServer:'
+ELSE 'MSSQL$' + @@SERVICENAME + ':'
+END ;
+-- Capture the first counter set
+SELECT CAST(1 AS INT) AS collection_instance ,
+[OBJECT_NAME] ,
+counter_name ,
+instance_name ,
+cntr_value ,
+cntr_type ,
+CURRENT_TIMESTAMP AS collection_time
+INTO #perf_counters_init
+FROM sys.dm_os_performance_counters
+WHERE ( OBJECT_NAME = @CounterPrefix + 'Access Methods'
+AND counter_name = 'Full Scans/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Access Methods'
+AND counter_name = 'Index Searches/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Buffer Manager'
+AND counter_name = 'Lazy Writes/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Buffer Manager'
+AND counter_name = 'Page life expectancy'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'General Statistics'
+AND counter_name = 'Processes Blocked'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'General Statistics'
+AND counter_name = 'User Connections'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Locks'
+AND counter_name = 'Lock Waits/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Locks'
+AND counter_name = 'Lock Wait Time (ms)'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'SQL Statistics'
+AND counter_name = 'SQL Re-Compilations/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Memory Manager'
+AND counter_name = 'Memory Grants Pending'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'SQL Statistics'
+AND counter_name = 'Batch Requests/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'SQL Statistics'
+AND counter_name = 'SQL Compilations/sec'
+)
+-- Wait on Second between data collection
+WAITFOR DELAY '00:00:01'
+-- Capture the second counter set
+SELECT CAST(2 AS INT) AS collection_instance ,
+OBJECT_NAME ,
+counter_name ,
+instance_name ,
+cntr_value ,
+cntr_type ,
+CURRENT_TIMESTAMP AS collection_time
+INTO #perf_counters_second
+FROM sys.dm_os_performance_counters
+WHERE ( OBJECT_NAME = @CounterPrefix + 'Access Methods'
+AND counter_name = 'Full Scans/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Access Methods'
+AND counter_name = 'Index Searches/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Buffer Manager'
+AND counter_name = 'Lazy Writes/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Buffer Manager'
+AND counter_name = 'Page life expectancy'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'General Statistics'
+AND counter_name = 'Processes Blocked'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'General Statistics'
+AND counter_name = 'User Connections'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Locks'
+AND counter_name = 'Lock Waits/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Locks'
+AND counter_name = 'Lock Wait Time (ms)'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'SQL Statistics'
+AND counter_name = 'SQL Re-Compilations/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'Memory Manager'
+AND counter_name = 'Memory Grants Pending'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'SQL Statistics'
+AND counter_name = 'Batch Requests/sec'
+)
+OR ( OBJECT_NAME = @CounterPrefix + 'SQL Statistics'
+AND counter_name = 'SQL Compilations/sec'
+)
+-- Calculate the cumulative counter values
+SELECT i.OBJECT_NAME ,
+i.counter_name ,
+i.instance_name ,
+CASE WHEN i.cntr_type = 272696576
+THEN s.cntr_value - i.cntr_value
+WHEN i.cntr_type = 65792 THEN s.cntr_value
+END AS cntr_value
+FROM #perf_counters_init AS i
+JOIN #perf_counters_second AS s
+ON i.collection_instance + 1 = s.collection_instance
+AND i.OBJECT_NAME = s.OBJECT_NAME
+AND i.counter_name = s.counter_name
+AND i.instance_name = s.instance_name
+ORDER BY OBJECT_NAME
+-- Cleanup tables
+DROP TABLE #perf_counters_init
+DROP TABLE #perf_counters_second
+
+--execution statistics
+SELECT TOP 10
+execution_count ,
+statement_start_offset AS stmt_start_offset ,
+sql_handle ,
+plan_handle ,
+total_logical_reads / execution_count AS avg_logical_reads ,
+total_logical_writes / execution_count AS avg_logical_writes ,
+total_physical_reads / execution_count AS avg_physical_reads ,
+t.text
+FROM sys.dm_exec_query_stats AS s
+CROSS APPLY sys.dm_exec_sql_text(s.sql_handle) AS t
+ORDER BY avg_physical_reads DESC
+
+
+--CPU pressure via signal waittime
+SELECT (SUM(signal_wait_time_ms)) AS TotalSignalWaitTime ,
+convert(decimal(12,2),round(( SUM(CAST(signal_wait_time_ms AS NUMERIC(20, 2))) / SUM(CAST(wait_time_ms AS NUMERIC(20, 2))) * 100 ),2))
+AS PercentageSignalWaitsOfTotalTime
+FROM sys.dm_os_wait_stats
+
+
+--top 10 wait events
+SELECT TOP ( 10 )
+wait_type ,
+waiting_tasks_count ,
+( wait_time_ms - signal_wait_time_ms ) AS resource_wait_time ,
+max_wait_time_ms ,
+CASE waiting_tasks_count
+WHEN 0 THEN 0
+ELSE wait_time_ms / waiting_tasks_count
+END AS avg_wait_time
+FROM sys.dm_os_wait_stats
+WHERE wait_type NOT LIKE '%SLEEP%' -- remove eg. SLEEP_TASK and
+-- LAZYWRITER_SLEEP waits
+AND wait_type NOT LIKE 'XE%'
+AND wait_type NOT IN -- remove system waits
+( 'KSOURCE_WAKEUP', 'BROKER_TASK_STOP', 'FT_IFTS_SCHEDULER_IDLE_WAIT',
+'SQLTRACE_BUFFER_FLUSH', 'CLR_AUTO_EVENT', 'BROKER_EVENTHANDLER',
+'BAD_PAGE_PROCESS', 'BROKER_TRANSMITTER', 'CHECKPOINT_QUEUE',
+'DBMIRROR_EVENTS_QUEUE', 'SQLTRACE_BUFFER_FLUSH', 'CLR_MANUAL_EVENT',
+'ONDEMAND_TASK_QUEUE', 'REQUEST_FOR_DEADLOCK_SEARCH', 'LOGMGR_QUEUE',
+'BROKER_RECEIVE_WAITFOR', 'PREEMPTIVE_OS_GETPROCADDRESS',
+'PREEMPTIVE_OS_AUTHENTICATIONOPS', 'BROKER_TO_FLUSH' )
+ORDER BY wait_time_ms DESC
+
+--investigating scheduler queues
+SELECT scheduler_id ,
+current_tasks_count ,
+runnable_tasks_count
+FROM sys.dm_os_schedulers
+WHERE scheduler_id < 255
+
+
+--top ten CPU-consuming queries.
+execution_count ,
+total_worker_time / 1000 AS total_worker_time_ms ,
+( total_worker_time / 1000 ) / execution_count
+AS avg_worker_time_ms ,
+total_logical_reads ,
+total_logical_reads / execution_count AS avg_logical_reads ,
+total_elapsed_time / 1000 AS total_elapsed_time_ms ,
+( total_elapsed_time / 1000 ) / execution_count
+AS avg_elapsed_time_ms ,
+qp.query_plan
+FROM sys.dm_exec_query_stats qs
+CROSS APPLY sys.dm_exec_sql_text(qs.sql_handle) st
+CROSS APPLY sys.dm_exec_query_plan(qs.plan_handle) qp
+ORDER BY total_worker_time DESC
+
+--finding blocking using sessions and requests
+SELECT er.session_id ,
+host_name , program_name , original_login_name , er.reads ,
+er.writes ,er.cpu_time , wait_type , wait_time , wait_resource ,
+blocking_session_id , st.text
+FROM sys.dm_exec_sessions es
+LEFT JOIN sys.dm_exec_requests er
+ON er.session_id = es.session_id
+OUTER APPLY sys.dm_exec_sql_text(er.sql_handle) st
+WHERE blocking_session_id > 0
+UNION
+SELECT es.session_id , host_name , program_name , original_login_name ,
+es.reads , es.writes , es.cpu_time , wait_type , wait_time ,
+wait_resource , blocking_session_id , st.text
+FROM sys.dm_exec_sessions es
+LEFT JOIN sys.dm_exec_requests er
+ON er.session_id = es.session_id
+OUTER APPLY sys.dm_exec_sql_text(er.sql_handle) st
+WHERE es.session_id IN ( SELECT blocking_session_id
+FROM sys.dm_exec_requests
+WHERE blocking_session_id > 0 )
+
+--command that caused the blocking
+SELECT ec.session_id ,
+ec.connect_time ,
+st.dbid AS DatabaseID ,
+st.objectid ,
+st.text
+FROM sys.dm_exec_connections ec
+CROSS APPLY sys.dm_exec_sql_text(ec.most_recent_sql_handle) st
+WHERE session_id = <59>
+
+--investogate blocking using waiting tasks
+SELECT blocking.session_id AS blocking_session_id ,
+blocked.session_id AS blocked_session_id ,
+waitstats.wait_type AS blocking_resource ,
+waitstats.wait_duration_ms ,
+waitstats.resource_description ,
+blocked_cache.text AS blocked_text ,
+blocking_cache.text AS blocking_text
+FROM sys.dm_exec_connections AS blocking
+INNER JOIN sys.dm_exec_requests blocked
+ON blocking.session_id = blocked.blocking_session_id
+CROSS APPLY sys.dm_exec_sql_text(blocked.sql_handle)
+blocked_cache
+CROSS APPLY sys.dm_exec_sql_text(blocking.most_recent_sql_handle)
+blocking_cache
+INNER JOIN sys.dm_os_waiting_tasks waitstats
+ON waitstats.session_id = blocked.session_id
+
+--tran locks
+SELECT request_session_id ,
+resource_type ,
+DB_NAME(resource_database_id) AS DatabaseName ,
+resource_associated_entity_id ,
+resource_description ,
+request_mode ,
+request_status
+FROM sys.dm_tran_locks AS dtl
+WHERE request_session_id IN ( 52, 53 )
+AND resource_type NOT IN ( 'DATABASE', 'METADATA' )
+
+
+--Identifying missing indexes based on query cost benefit
+SELECT convert(decimal(12,2),(migs.avg_total_user_cost * ( migs.avg_user_impact / 100.0 )),2)
+* ( migs.user_seeks + migs.user_scans ) AS improvement_measure ,
+'CREATE INDEX [missing_index_'
++ CONVERT (VARCHAR, mig.index_group_handle) + '_'
++ CONVERT (VARCHAR, mid.index_handle) + '_'
++ LEFT(PARSENAME(mid.statement, 1), 32) + ']' + ' ON '
++ mid.statement
++ ' (' + ISNULL(mid.equality_columns, '')
++ CASE WHEN mid.equality_columns IS NOT NULL
+AND mid.inequality_columns IS NOT NULL THEN ','
+ELSE ''
+END + ISNULL(mid.inequality_columns, '') + ')'
++ ISNULL(' INCLUDE ('
++ mid.included_columns
++ ')', '')
+AS create_index_statement ,
+migs.* ,
+mid.database_id ,
+mid.[object_id]
+FROM sys.dm_db_missing_index_groups mig
+INNER JOIN sys.dm_db_missing_index_group_stats migs
+ON migs.group_handle = mig.index_group_handle
+INNER JOIN sys.dm_db_missing_index_details mid
+ON mig.index_handle = mid.index_handle
+WHERE migs.avg_total_user_cost * ( migs.avg_user_impact / 100.0 )
+* ( migs.user_seeks + migs.user_scans ) > 10
+ORDER BY migs.avg_total_user_cost * migs.avg_user_impact
+* ( migs.user_seeks + migs.user_scans ) DESC
+
+
+--Parsing missing index information out of XML showplans
+;
+WITH XMLNAMESPACES
+(DEFAULT 'http://schemas.microsoft.com/sqlserver/2004/07/showplan')
+SELECT MissingIndexNode.value('(MissingIndexGroup/@Impact)[1]', 'float')
+AS impact ,
+OBJECT_NAME(sub.objectid, sub.dbid) AS calling_object_name ,
+MissingIndexNode.value
+('(MissingIndexGroup/MissingIndex/@Database)[1]',
+'VARCHAR(128)') + '.'
++ MissingIndexNode.value
+('(MissingIndexGroup/MissingIndex/@Schema)[1]',
+'VARCHAR(128)') + '.'
++ MissingIndexNode.value
+('(MissingIndexGroup/MissingIndex/@Table)[1]',
+'VARCHAR(128)') AS table_name ,
+STUFF(( SELECT ',' + c.value('(@Name)[1]', 'VARCHAR(128)')
+FROM MissingIndexNode.nodes
+('MissingIndexGroup/MissingIndex/
+ColumnGroup[@Usage="EQUALITY"]/Column')
+AS t ( c )
+FOR
+XML PATH('')
+), 1, 1, '') AS equality_columns ,
+STUFF(( SELECT ',' + c.value('(@Name)[1]', 'VARCHAR(128)')
+FROM MissingIndexNode.nodes
+('MissingIndexGroup/MissingIndex/
+ColumnGroup[@Usage="INEQUALITY"]/Column')
+AS t ( c )
+FOR
+XML PATH('')
+), 1, 1, '') AS inequality_columns ,
+STUFF(( SELECT ',' + c.value('(@Name)[1]', 'VARCHAR(128)')
+FROM MissingIndexNode.nodes
+('MissingIndexGroup/MissingIndex/
+ColumnGroup[@Usage="INCLUDE"]/Column')
+AS t ( c )
+FOR
+XML PATH('')
+), 1, 1, '') AS include_columns ,
+sub.usecounts AS qp_usecounts ,
+sub.refcounts AS qp_refcounts ,
+qs.execution_count AS qs_execution_count ,
+qs.last_execution_time AS qs_last_exec_time ,
+qs.total_logical_reads AS qs_total_logical_reads ,
+qs.total_elapsed_time AS qs_total_elapsed_time ,
+qs.total_physical_reads AS qs_total_physical_reads ,
+qs.total_worker_time AS qs_total_worker_time ,
+StmtPlanStub.value('(StmtSimple/@StatementText)[1]', 'varchar(8000)') AS statement_text
+FROM ( SELECT ROW_NUMBER() OVER
+( PARTITION BY qs.plan_handle
+ORDER BY qs.statement_start_offset )
+AS StatementID ,
+qs.*
+FROM sys.dm_exec_query_stats qs
+) AS qs
+JOIN ( SELECT x.query('../../..') AS StmtPlanStub ,
+x.query('.') AS MissingIndexNode ,
+x.value('(../../../@StatementId)[1]', 'int')
+AS StatementID ,
+cp.* ,
+qp.*
+FROM sys.dm_exec_cached_plans AS cp
+CROSS APPLY sys.dm_exec_query_plan
+(cp.plan_handle) qp
+CROSS APPLY qp.query_plan.nodes
+('/ShowPlanXML/BatchSequence/
+Batch/Statements/StmtSimple/
+QueryPlan/MissingIndexes/
+MissingIndexGroup') mi ( x )
+) AS sub ON qs.plan_handle = sub.plan_handle
+AND qs.StatementID = sub.StatementID
+
+
+--Identifying single-column, non-indexed FOREIGN KEYs
+SELECT fk.name AS CONSTRAINT_NAME ,
+s.name AS SCHEMA_NAME ,
+o.name AS TABLE_NAME ,
+fkc_c.name AS CONSTRAINT_COLUMN_NAME
+FROM sys.foreign_keys AS fk
+JOIN sys.foreign_key_columns AS fkc
+ON fk.object_id = fkc.constraint_object_id
+JOIN sys.columns AS fkc_c
+ON fkc.parent_object_id = fkc_c.object_id
+AND fkc.parent_column_id = fkc_c.column_id
+LEFT JOIN sys.index_columns ic
+JOIN sys.columns AS c ON ic.object_id = c.object_id
+AND ic.column_id = c.column_id
+ON fkc.parent_object_id = ic.object_id
+AND fkc.parent_column_id = ic.column_id
+JOIN sys.objects AS o ON o.object_id = fk.parent_object_id
+JOIN sys.schemas AS s ON o.schema_id = s.schema_id
+WHERE c.name IS NULL
+
+
+--Finding unused non-clustered indexes
+SELECT OBJECT_SCHEMA_NAME(i.object_id) AS SchemaName ,
+OBJECT_NAME(i.object_id) AS TableName ,
+i.name ,
+ius.user_seeks ,
+ius.user_scans ,
+ius.user_lookups ,
+ius.user_updates
+FROM sys.dm_db_index_usage_stats AS ius
+JOIN sys.indexes AS i ON i.index_id = ius.index_id
+AND i.object_id = ius.object_id
+WHERE ius.database_id = DB_ID()
+AND i.is_unique_constraint = 0 -- no unique indexes
+AND i.is_primary_key = 0
+AND i.is_disabled = 0
+AND i.type > 1 -- don't consider heaps/clustered index
+AND ( ( ius.user_seeks + ius.user_scans +
+ius.user_lookups ) < ius.user_updates
+OR ( ius.user_seeks = 0
+AND ius.user_scans = 0
+)
+)
+
+

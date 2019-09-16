@@ -1,0 +1,9 @@
+SELECT usecounts ,
+cacheobjtype ,
+objtype ,
+OBJECT_NAME(dest.objectid)
+FROM sys.dm_exec_cached_plans decp
+CROSS APPLY sys.dm_exec_sql_text(decp.plan_handle) AS dest
+WHERE dest.objectid = OBJECT_ID('<procedureName>')
+AND dest.dbid = DB_ID()
+ORDER BY usecounts DESC ;

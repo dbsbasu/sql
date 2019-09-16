@@ -1,0 +1,54 @@
+--by far his is the best tran-locking-blocking query I have ever written
+select
+dowt.blocking_session_id as blocking_session_id,
+des_blocking.login_name as blocking_user,
+des_blocking.[host_name] as blocking_host_name,
+dest_blocking.[text] as blocking_statement,
+des_blocking.last_request_start_time  as blocking_last_request_start_time,
+dowt.resource_description as blocking_resource_info_string,
+des_blocking.[status] as blocking_session_status,
+case  
+when des_blocking.transaction_isolation_level = 0 then 'Unspecified'
+when des_blocking.transaction_isolation_level = 1 then 'ReadUncomitted'
+when des_blocking.transaction_isolation_level = 2 then 'ReadCommitted'
+when des_blocking.transaction_isolation_level = 3 then 'Repeatable'
+when des_blocking.transaction_isolation_level = 4 then 'Serializable'
+when des_blocking.transaction_isolation_level = 5 then 'Snapshot'
+else 'undetermined'
+end	   as blocking_tran_isolation_level,
+dowt.session_id as blocked_session_id,
+des_blocked.login_name as blocked_user,
+des_blocked.[host_name] as blocked_host_name,
+dest_blocked.[text] as blocked_statement,
+des_blocked.last_request_start_time as blocked_session_last_request_start_time,
+cast (((dowt.wait_duration_ms / 1000) / 60) as varchar(20)) + ' min ' +  cast (((dowt.wait_duration_ms / 1000) % 60)  as varchar(20)) as wait_duration,
+des_blocked.[status] as blocked_session_status,
+case  
+when des_blocked.transaction_isolation_level = 0 then 'Unspecified'
+when des_blocked.transaction_isolation_level = 1 then 'ReadUncomitted'
+when des_blocked.transaction_isolation_level = 2 then 'ReadCommitted'
+when des_blocked.transaction_isolation_level = 3 then 'Repeatable'
+when des_blocked.transaction_isolation_level = 4 then 'Serializable'
+when des_blocked.transaction_isolation_level = 5 then 'Snapshot'
+else 'undetermined'
+end as blocked_tran_isolation_level,
+dtl.request_status as lock_request_status,
+dtl.request_type as lock_request_type,
+dtl.request_mode as lock_request_mode,
+DOWT.wait_type as wait_type ,
+DTL.resource_type as lock_resource_type,
+case 
+when dtl.resource_type in ('database','file','metadata') then dtl.resource_type 
+when dtl.resource_type = 'object' then object_name(dtl.resource_associated_entity_id, dtl.resource_database_id)
+when dtl.resource_type in ('key','page','rid') then (select object_name(object_id) from sys.partitions pts where pts.hobt_id = dtl.resource_associated_entity_id)
+else 'other'
+end as objectName
+from sys.dm_os_waiting_tasks dowt
+inner join sys.dm_exec_requests der on der.session_id = dowt.session_id
+inner join sys.dm_exec_sessions des_blocked on des_blocked.session_id = dowt.session_id 
+inner join sys.dm_exec_sessions des_blocking on des_blocking.session_id = dowt.blocking_session_id
+inner join sys.dm_exec_connections decn on decn.most_recent_session_id = dowt.blocking_session_id
+inner join sys.dm_tran_locks dtl on dtl.lock_owner_address = dowt.resource_address
+cross apply sys.dm_exec_sql_text(decn.most_recent_sql_handle) as dest_blocking
+cross apply sys.dm_exec_sql_text(der.sql_handle) as dest_blocked
+where dtl.resource_database_id = db_id()

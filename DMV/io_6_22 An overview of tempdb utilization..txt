@@ -1,0 +1,11 @@
+SELECT mf.physical_name ,
+mf.size AS entire_file_page_count ,
+dfsu.version_store_reserved_page_count ,
+dfsu.unallocated_extent_page_count ,
+dfsu.user_object_reserved_page_count ,
+dfsu.internal_object_reserved_page_count ,
+dfsu.mixed_extent_page_count
+FROM sys.dm_db_file_space_usage dfsu
+JOIN sys.master_files AS mf ON mf.database_id = dfsu.database_id
+AND mf.file_id = dfsu.file_id
+

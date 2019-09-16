@@ -1,0 +1,27 @@
+--A non-zero value in runnable tasks indicates that tasks have to wait for their time slice to run. which shows a symptom of a CPU  bottleneck
+select scheduler_id, sum(current_tasks_count) as current_tasks_count, sum(runnable_tasks_count) as runnable_tasks_count
+,sum(pending_disk_io_count) AS pending_disk_io_count, sum(current_workers_count) AS current_workers_count, sum(active_workers_count) AS active_workers_count, sum(work_queue_count) AS work_queue_count
+from sys.dm_os_schedulers
+where scheduler_id in (cpu_id) and status='VISIBLE ONLINE'
+group by scheduler_id
+
+--cpu and memory
+SELECT cpu_count/hyperthread_ratio as physical_CPU_count, hyperthread_ratio, cpu_count as logical_CPU_count,
+physical_memory_in_bytes/(1024*1024*1024) as Physical_Memory_GB
+FROM sys.dm_os_sys_info OPTION (RECOMPILE);
+
+--cpu used by sql server
+select *, cpu_id, scheduler_id, is_online from sys.dm_os_schedulers --where status='VISIBLE ONLINE'
+
+
+--no-yielding worker on a schduler
+
+select des1.session_id, 
+der.command, der.[status], der.wait_type, der.scheduler_id, 
+dot.task_state, dot.session_id, dot.exec_context_id, dot.request_id,
+dow.worker_address, dow.is_preemptive, dow.[state] 
+from sys.dm_exec_sessions as des1
+inner join sys.dm_exec_requests as der on des1.session_id = der.session_id
+inner join sys.dm_os_tasks as dot on dot.task_address = der.task_address
+inner join sys.dm_os_workers as dow on dow.worker_address = dot.worker_address
+--where dow.worker_address = 0x000000008156c1a0 

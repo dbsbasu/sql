@@ -1,0 +1,17 @@
+DECLARE @databaseName SYSNAME
+SET @databaseName = '%'
+--'%' gives all databases
+SELECT LEFT(physical_name, 1) AS drive ,
+CAST(SUM(num_of_bytes_read) AS DECIMAL)
+/ ( CAST(SUM(num_of_bytes_written) AS DECIMAL)
++ CAST(SUM(num_of_bytes_read) AS DECIMAL) ) AS RatioOfReads ,
+CAST(SUM(num_of_bytes_written) AS DECIMAL)
+/ ( CAST(SUM(num_of_bytes_written) AS DECIMAL)
++ CAST(SUM(num_of_bytes_read) AS DECIMAL) ) AS RatioOfWrites ,
+SUM(num_of_bytes_read) AS TotalBytesRead ,
+SUM(num_of_bytes_written) AS TotalBytesWritten
+FROM sys.dm_io_virtual_file_stats(NULL, NULL) AS divfs
+JOIN sys.master_files AS mf ON mf.database_id = divfs.database_id
+AND mf.file_id = divfs.file_id
+WHERE DB_NAME(divfs.database_id) LIKE @databaseName
+GROUP BY LEFT(mf.physical_name, 1)

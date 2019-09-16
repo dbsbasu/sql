@@ -1,0 +1,6 @@
+SELECT counter ,
+occurrence ,
+value
+FROM sys.dm_exec_query_optimizer_info
+WHERE counter IN ( 'optimizations', 'elapsed time', 'final cost' ) ;
+

@@ -1,0 +1,10 @@
+SELECT mf.physical_name ,
+dipir.io_pending ,
+dipir.io_pending_ms_ticks
+FROM sys.dm_io_pending_io_requests AS dipir
+JOIN sys.dm_io_virtual_file_stats(NULL, NULL) AS divfs
+ON dipir.io_handle = divfs.file_handle
+JOIN sys.master_files AS mf ON divfs.database_id = mf.database_id
+AND divfs.file_id = mf.file_id
+ORDER BY dipir.io_pending , --Show I/O completed by the OS first
+dipir.io_pending_ms_ticks DESC

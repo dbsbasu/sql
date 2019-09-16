@@ -1,0 +1,23 @@
+DECLARE @databaseName SYSNAME
+SET @databaseName = 'BusyDatabase' --obviously not the real name
+--'%' gives all databases
+SELECT CASE
+WHEN ( SUM(user_updates + user_seeks + user_scans + user_lookups) = 0 )
+THEN NULL
+ELSE ( CAST(SUM(user_seeks + user_scans + user_lookups)
+AS DECIMAL)
+/ CAST(SUM(user_updates + user_seeks + user_scans
++ user_lookups) AS DECIMAL) )
+END AS RatioOfReads ,
+CASE
+WHEN ( SUM(user_updates + user_seeks + user_scans + user_lookups) = 0 )
+THEN NULL
+ELSE ( CAST(SUM(user_updates) AS DECIMAL)
+/ CAST(SUM(user_updates + user_seeks + user_scans
++ user_lookups) AS DECIMAL) )
+END AS RatioOfWrites ,
+SUM(user_updates + user_seeks + user_scans + user_lookups)
+AS TotalReadOperations ,
+SUM(user_updates) AS TotalWriteOperations
+FROM sys.dm_db_index_usage_stats AS ddius
+WHERE DB_NAME(database_id) LIKE @databaseName

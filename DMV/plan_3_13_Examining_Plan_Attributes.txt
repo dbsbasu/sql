@@ -1,0 +1,11 @@
+SELECT CAST(depa.attribute AS VARCHAR(30)) AS attribute ,
+CAST(depa.value AS VARCHAR(30)) AS value ,
+depa.is_cache_key
+FROM ( SELECT TOP 1
+*
+FROM sys.dm_exec_cached_plans
+ORDER BY usecounts DESC
+) decp
+OUTER APPLY sys.dm_exec_plan_attributes(decp.plan_handle) depa
+WHERE is_cache_key = 1
+ORDER BY usecounts DESC ;

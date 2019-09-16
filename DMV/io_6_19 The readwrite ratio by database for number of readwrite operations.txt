@@ -1,0 +1,15 @@
+DECLARE @databaseName SYSNAME
+SET @databaseName = 'BusyDatabase'
+--obviously not the real name
+--'%' gives all databases
+SELECT CAST(SUM(num_of_reads) AS DECIMAL)
+/ ( CAST(SUM(num_of_writes) AS DECIMAL)
++ CAST(SUM(num_of_reads) AS DECIMAL) ) AS RatioOfReads ,
+CAST(SUM(num_of_writes) AS DECIMAL)
+/ ( CAST(SUM(num_of_reads) AS DECIMAL)
++ CAST(SUM(num_of_writes) AS DECIMAL) ) AS RatioOfWrites ,
+SUM(num_of_reads) AS TotalReadOperations ,
+SUM(num_of_writes) AS TotalWriteOperations
+FROM sys.dm_io_virtual_file_stats(NULL, NULL) AS divfs
+WHERE DB_NAME(database_id) LIKE @databaseName
+

@@ -1,0 +1,17 @@
+-- Top Cached SPs By Total Logical Reads (SQL 2008 only).
+-- Logical reads relate to memory pressure
+SELECT TOP ( 25 )
+p.name AS [SP Name] ,
+deps.total_logical_reads AS [TotalLogicalReads] ,
+deps.total_logical_reads / deps.execution_count AS [AvgLogicalReads] ,
+deps.execution_count ,
+ISNULL(deps.execution_count / DATEDIFF(Second, deps.cached_time,
+GETDATE()), 0) AS [Calls/Second] ,
+deps.total_elapsed_time ,
+deps.total_elapsed_time / deps.execution_count AS [avg_elapsed_time] ,
+deps.cached_time
+FROM sys.procedures AS p
+INNER JOIN sys.dm_exec_procedure_stats
+AS deps ON p.[object_id] = deps.[object_id]
+WHERE deps.database_id = DB_ID()
+ORDER BY deps.total_logical_reads DESC ;

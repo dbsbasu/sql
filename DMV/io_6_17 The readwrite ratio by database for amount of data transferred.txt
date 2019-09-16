@@ -1,0 +1,19 @@
+--uses a LIKE comparison to only include desired databases, rather than
+--using the database_id parameter of sys.dm_io_virtual_file_stats
+--if you have a rather large number of databases, this may not be the
+--optimal way to execute the query, but this gives you flexibility
+--to look at multiple databases simultaneously.
+DECLARE @databaseName SYSNAME
+SET @databaseName = '%'
+--'%' gives all databases
+SELECT CAST(SUM(num_of_bytes_read) AS DECIMAL)
+/ ( CAST(SUM(num_of_bytes_written) AS DECIMAL)
++ CAST(SUM(num_of_bytes_read) AS DECIMAL) ) AS RatioOfReads ,
+CAST(SUM(num_of_bytes_written) AS DECIMAL)
+/ ( CAST(SUM(num_of_bytes_written) AS DECIMAL)
++ CAST(SUM(num_of_bytes_read) AS DECIMAL) ) AS RatioOfWrites ,
+SUM(num_of_bytes_read) AS TotalBytesRead ,
+SUM(num_of_bytes_written) AS TotalBytesWritten
+FROM sys.dm_io_virtual_file_stats(NULL, NULL) AS divfs
+WHERE DB_NAME(database_id) LIKE @databaseName
+

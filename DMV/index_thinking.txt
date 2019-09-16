@@ -1,0 +1,1 @@
+de-select or show, primary key, unique key, disabled, clustred index. even if these type of indexes not showing usage, don't consider even dropping them

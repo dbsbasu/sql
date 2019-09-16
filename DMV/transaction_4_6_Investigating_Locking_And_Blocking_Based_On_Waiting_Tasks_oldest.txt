@@ -1,0 +1,77 @@
+--investigate locking : indicate lead blocker. 
+--if I do not want to see all blocking-blocked pairs that join the fun, I would just uncomment predicate der_lead...=0 
+--Note: (if not connected to the database, with resource_type as page, object_name is not available based on hobt_id. so please do not commentout where clause with db_id())
+select case der_lead.blocking_session_id when 0 then 'LEAD' else '-' end as lead_blocker_ind,
+--blocked session
+dowt.session_id as blocked_session_id,
+--blocking session info starts
+dowt.blocking_session_id as blocking_session_id ,
+des_blocking.login_name as blocking_user,
+des_blocking.host_name as blocking_host_name,
+des_blocking.last_request_start_time  as blocking_last_request_start_time,
+--I do not do my generic statement offest piece here as I want to know the entire blocking statement
+dest_blocking.text as blocking_statement,
+--I call it string as that is all microsoft display as of this writing
+dowt.resource_description as blocking_resource_info_string,
+des_blocking.transaction_isolation_level as blocking_transaction_isolation_level,
+--blocked session info starts
+dowt.session_id as blocked_session_id,
+des_blocked.login_name as blocked_user,
+des_blocked.host_name as blocked_host_name,
+des_blocked.last_request_start_time as blocked_session_last_request_start_time,
+cast (((dowt.wait_duration_ms / 1000) / 60) as varchar(20)) + ' min ' +  cast (((dowt.wait_duration_ms / 1000) % 60)  as varchar(20)) as wait_duration ,
+dtl.request_status as request_status,
+dtl.request_type,
+dtl.request_mode as lock_mode,
+--my generic resource type query
+case when dtl.resource_type in ( 'database', 'file', 'metadata' ) then dtl.resource_type 
+when dtl.resource_type = 'object' then object_name(dtl.resource_associated_entity_id, dtl.resource_database_id)
+when dtl.resource_type in ( 'key', 'page', 'rid' )     then 
+   (select object_name(object_id)
+    from sys.partitions pts
+    where pts.hobt_id = dtl.resource_associated_entity_id)
+else 'other'
+end as object_root,
+dtl.resource_type as resource_type ,
+coalesce(der_blocked.wait_resource,dtl.resource_description) as wait_resource_description,
+dowt.wait_type as wait_type,
+des_blocked.transaction_isolation_level as blocked_transaction_isolation_level,
+--my generic statement offest piece
+dest_blocked.text as blocked_statement,
+--I can try my generic statement offest piece here, as I want to know the last blocked statement
+substring(dest_blocked.text, der_blocked.statement_start_offset / 2,
+( case when der_blocked.statement_end_offset = -1 then datalength(dest_blocked.text)
+else der_blocked.statement_end_offset
+end - der_blocked.statement_start_offset ) / 2 ) as blocked_statement_try_formatting 
+from sys.dm_tran_locks dtl
+--my most important join for locking-blocking is the inner join with resource_address
+inner join sys.dm_os_waiting_tasks dowt on dtl.lock_owner_address = dowt.resource_address
+inner join sys.dm_exec_requests der_blocked on der_blocked.session_id = dowt.session_id
+inner join sys.dm_exec_sessions des_blocked on des_blocked.session_id = dowt.session_id 
+inner join sys.dm_exec_sessions des_blocking on des_blocking.session_id = dowt.blocking_session_id
+inner join sys.dm_exec_requests der_blocking on der_blocking.session_id = dowt.blocking_session_id
+--if I do not want to see all blocking-blocked pairs that join the fun, I would just uncomment predicate der_lead...=0 
+inner join sys.dm_exec_requests der_lead on der_lead.session_id = dowt.blocking_session_id --and der_lead.blocking_session_id = 0
+inner join sys.dm_exec_connections dec on dtl.request_session_id = dec.most_recent_session_id
+cross apply sys.dm_exec_sql_text(der_blocking.sql_handle) as dest_blocking
+cross apply sys.dm_exec_sql_text(der_blocked.sql_handle) as dest_blocked
+where dtl.resource_database_id = db_id()
+order by lead_blocker_ind desc, blocking_last_request_start_time asc
+
+
+-- get all sessions participating in the locking-blocking chain
+;with block as
+(
+select distinct der_blockers.blocking_session_id as blockers
+from sys.dm_exec_requests der_blockers
+)
+select session_id, 0 as blocking_session_id, block_desc = 'lead blocker', des.last_request_start_time as starttime
+from sys.dm_exec_sessions des
+inner join block on des.session_id = block.blockers
+where 
+exists(select 1 from sys.dm_exec_requests der where des.session_id = der.session_id and der.blocking_session_id = 0)
+union all
+select session_id, blocking_session_id, block_desc = 'victim blocked', der.start_time as starttime
+from sys.dm_exec_requests der 
+where der.blocking_session_id != 0
+order by block_desc, starttime asc

@@ -1,0 +1,37 @@
+select
+dowt.blocking_session_id as blocking_session_id,
+des_blocking.login_name as blocking_user,
+des_blocking.[host_name] as blocking_host_name,
+dest_blocking.[text] as blocking_statement,
+des_blocking.last_request_start_time  as blocking_last_request_start_time,
+dowt.resource_description as blocking_resource_info_string,
+des_blocking.transaction_isolation_level as blocking_transaction_isolation_level,
+dowt.session_id as blocked_session_id,
+des_blocked.login_name as blocked_user,
+des_blocked.[host_name] as blocked_host_name,
+dest_blocked.[text],
+des_blocked.last_request_start_time as blocked_session_last_request_start_time,
+cast (((dowt.wait_duration_ms / 1000) / 60) as varchar(20)) + ' min ' +  cast (((dowt.wait_duration_ms / 1000) % 60)  as varchar(20)) as wait_duration ,
+dtl.request_status as request_status,
+dtl.request_type,
+dtl.request_mode as lock_mode,
+DOWT.wait_type as wait_type ,
+DTL.resource_type as resource_type ,
+case when dtl.resource_type in ( 'database', 'file', 'metadata' ) then dtl.resource_type 
+when dtl.resource_type = 'object' then object_name(dtl.resource_associated_entity_id, dtl.resource_database_id)
+when dtl.resource_type in ( 'key', 'page', 'rid' )     then 
+   (select object_name(object_id)
+    from sys.partitions pts
+    where pts.hobt_id = dtl.resource_associated_entity_id)
+else 'other'
+end as object_root
+from sys.dm_tran_locks dtl
+inner join sys.dm_os_waiting_tasks dowt on dowt.resource_address = dtl.lock_owner_address
+inner join sys.dm_exec_requests der on der.session_id = dowt.session_id
+inner join sys.dm_exec_sessions des_blocked on des_blocked.session_id = dowt.session_id 
+inner join sys.dm_exec_sessions des_blocking on des_blocking.session_id = dowt.blocking_session_id
+inner join sys.dm_exec_connections dec on dec.most_recent_session_id = dowt.blocking_session_id
+cross apply sys.dm_exec_sql_text(dec.most_recent_sql_handle) as dest_blocking
+cross apply sys.dm_exec_sql_text(der.sql_handle) as dest_blocked
+where dtl.resource_database_id = db_id()
+
