@@ -1,0 +1,150 @@
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+ 
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green " Started at $STARTsysdatetime" 
+
+$creddomain1 = Get-Credential "domain1\userid"
+$creddomainxxx = Get-Credential "domainxxx\userid"
+$creddomainxxxq = Get-Credential "domainxxxq\userid"
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "$sysdatetime : Retrieving data from source "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='server';Initial Catalog='mydb';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT InstanceNam, PortNum
+FROM [Inventory].[mytable]
+WHERE 
+--Choice = 'y'
+--Instance_Pri_Env = 'PD' and
+   (DBMSVer like '10%'
+   or DBMSVer like '9%')
+;
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+$outdata1 = $DataSet1.Tables[0]
+
+#--get Instance_DB_TLog_File_ and subsequently add them ======>
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object InstanceNam, PortNum
+$totCnt = $array15.count
+write-host -foregroundcolor green "TOTAL Qualified Instances: $totCnt "
+foreach ($row15 in $array15[0..1000])
+{  
+ $mountPointOut = @("")
+ $InsX = $row15.InstanceNam
+ $PortNum = $row15.PortNum
+ $InsX_port = $InsX+','+$PortNum
+ $sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+ $counterA = $counterA + 1
+ $serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+ if ($serverX.Settings.defaultlog.length > 0) {$DriveLetter = $serverX.Settings.defaultlog.substring(0,2)}
+ elseif($serverX.Settings.DefaultFile.length >0 ) {$DriveLetter = $serverX.Settings.DefaultFile.substring(0,2)} 
+ elseif($serverX.Information.MasterDBLogPath.length >0 ) {$DriveLetter = $serverX.Information.MasterDBLogPath.substring(0,2)} 
+ else {$DriveLetter = $serverX.Information.MasterDBPath.substring(0,2)}
+ if (-not $serverX.Information.Isclustered) {$DriveLetter =""}
+ $MachineNam = $serverX.Information.ComputerNamePhysicalNetBIOS 
+ $ServiceAccount = $serverX.ServiceAccount
+ $Domain = ($ServiceAccount).Split('\')[0]
+ if ($Domain -eq "domain1")
+ {
+  $mountPointsData = Get-WmiObject Win32_Volume -ComputerName $MachineNam -Credential $creddomain1 | Select-Object SystemName, Label ,Name, DriveLetter, DriveType, Capacity, Freespace
+ }
+   
+ if ($Domain -eq "domainxxx")
+ {
+  $mountPointsData = Get-WmiObject Win32_Volume -ComputerName $MachineNam -Credential $creddomainxxx | Select-Object SystemName, Label ,Name, DriveLetter, DriveType, Capacity, Freespace
+ }
+
+ if ($Domain -eq "domainxxxq")
+ {
+  $mountPointsData = Get-WmiObject Win32_Volume -ComputerName $MachineNam -Credential $creddomainxxxq | Select-Object SystemName, Label ,Name, DriveLetter, DriveType, Capacity, Freespace
+ }
+ write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP: Domain: $Domain  Machine: $MachineNam"
+
+ foreach ($mountPointRow in $mountPointsData) 
+ {
+  if ((-not $mountPointRow.name.StartsWith("\\")) -and $mountPointRow.name.StartsWith($DriveLetter) -and ($mountPointRow.Drivetype -ne 5)) 
+  {
+   if ($mountPointRow.Capacity -gt "0")
+   {
+    [float]$tempfloat = ([long]$mountPointRow.Freespace) / ([long]$mountPointRow.Capacity)
+    $PercentFree1 = [math]::round(($tempfloat * 100),2)
+    #$PercentFree = "{0,11:N2}" -f $PercentFree1
+    $PercentFree = $PercentFree1
+   }
+   else
+   {$PercentFree = 0}
+   [float]$TotalSpace_GB1 = [math]::round([long]$mountPointRow.Capacity / [long]1024000000, 3) 
+   #$TotalSpace_GB = "{0,11:N3}" -f $TotalSpace_GB1
+   $TotalSpace_GB = $TotalSpace_GB1
+   [float]$FreeSpace_GB1 = [math]::round([long]$mountPointRow.Freespace / [long]1024000000, 3) 
+   #$FreeSpace_GB = "{0,11:N3}" -f $FreeSpace_GB1
+   $FreeSpace_GB = $FreeSpace_GB1
+   add-member -InputObject $mountPointRow -MemberType NoteProperty -name TotalSpace_GB -value "$TotalSpace_GB" -force
+   add-member -InputObject $mountPointRow -MemberType NoteProperty -name FreeSpace_GB -value "$FreeSpace_GB" -force
+   add-member -InputObject $mountPointRow -MemberType NoteProperty -name PercentFree -value "$PercentFree" -force
+   $mountPointOut = $mountPointOut + $mountPointRow
+  }
+ }
+ $Ins_DL = @()
+ $Ins_DL = $mountPointOut | select-object SystemName, Name, TotalSpace_GB, FreeSpace_GB, PercentFree, Label  
+ 
+#--add Mountpoint info ======>
+$SqlConnectionMPs = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionMPs.ConnectionString = "Server='server';Initial Catalog='mydb';Integrated Security=True"
+ 
+$arrayMP = $Ins_DL | select-object SystemName, Name, TotalSpace_GB, FreeSpace_GB, PercentFree
+foreach ($MProw in $arrayMP)
+{
+$SystemName = $MProw.SystemName
+$Name = $MProw.Name
+$TotalSpace_GB  = $MProw.TotalSpace_GB 
+$FreeSpace_GB  = $MProw.FreeSpace_GB 
+$PercentFree = $MProw.PercentFree
+if ($SystemName -gt " " -and $Name -gt " " -and $InsX -gt " ")
+{
+$SqlCmdMPs = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdMPs.CommandText = " 
+insert into [Inventory].[mount] 
+      ([InstanceNam]
+      ,[MountPointNam]
+      ,[TotalSpace_GB]
+      ,[FreeSpace_GB]
+      ,[PercentFree]
+      ,[MachineNam]
+      ,[Domain])
+      values 
+      ('$InsX'
+      ,'$Name'
+      ,$TotalSpace_GB
+      ,$FreeSpace_GB
+      ,$PercentFree
+      ,'$MachineNam'
+      ,'$Domain');
+"
+$SqlCmdMPs.Connection = $SqlConnectionMPs
+$SqlCmdMPs.CommandTimeout = 0
+$SqlAdapterMPs = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterMPs.SelectCommand = $SqlCmdMPs
+$DataSetMPs = New-Object System.Data.DataSet
+$SqlAdapterMPs.Fill($DataSetMPs) | Out-Null
+}
+}
+$SqlConnectionMPs.Close()
+$Ins_DL = @()
+} 
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+
+

@@ -1,0 +1,89 @@
+$ErrorActionPreference = "Stop" 
+try {
+
+$jobsOut = @()
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+ 
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "z1_Instance_DB_Job_only_SMO: Started at $STARTsysdatetime" 
+
+$Source = "qmyserver"
+write-host -foregroundcolor yellow "Input Source Server:" $Source
+$JobName = "System Maintenance - Disable TLog Backup and Restore Jobs"
+write-host -foregroundcolor yellow "Input Job Name:     " $JobName
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "$sysdatetime : Retrieving data as requested "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='qmyserver,1433';Initial Catalog='master';Integrated Security=True"
+#####$SqlConnectionGetA.ConnectionString = "Server='myserver';Initial Catalog='master';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT ConnectionString FROM Monitor.dbo.serverlist with (nolock) WHERE CanConnect = 1 and DBAOwner like '%me%' ;--and Environment = 'dev' ;
+;
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+$outdata1 = $DataSet1.Tables[0]
+
+#--server SMO
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object ConnectionString
+$totCnt = $array15.count
+write-host -foregroundcolor green "TOTAL Qualified Instances: $totCnt "
+foreach ($row15 in $array15[0..1000])
+{  
+ $InsX_port = $row15.ConnectionString
+ $sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+ $counterA = $counterA + 1
+ $serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+
+# write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+
+$smosource = New-Object "Microsoft.SqlServer.Management.Smo.Server" $Source
+
+
+$JobScript = $smosource.JobServer.Jobs[$JobName].Script()
+
+
+$smotarget = New-Object "Microsoft.SqlServer.Management.Smo.Server" $InsX_port
+
+$jobExists = 0
+foreach($job in $smotarget.JobServer.Jobs) 
+  { if ( $job.Name -eq $JobName )
+      { $jobExists = 1 }
+  }
+
+#if ( $smotarget.JobServer.Jobs.Name -NotContains $JobName )
+if ( $jobExists -eq 0 )
+   { $smotarget.Databases["msdb"].ExecuteNonQuery($JobScript) 
+     write-host -foregroundcolor Cyan "Job has been CREATED in "  $InsX_port
+   }
+else
+   {
+     write-host -foregroundcolor Magenta "Job already EXISTS in "  $InsX_port   
+   }
+
+} #instance
+
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+
+}
+
+Catch { $quit = 'quitting due to error: ' 
+$ErrorMessage = $_.Exception.Message 
+$FullName = $_.Exception.GetType().FullName 
+$FailedItem = $_.Exception.ItemName 
+$quit + $FailedItem + $ErrorMessage + $FullName 
+Break }
+finally { $ErrorActionPreference = "Stop"}

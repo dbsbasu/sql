@@ -1,0 +1,115 @@
+--Input: List the mountpoints data you are interested in
+declare @inSelectColumnList varchar(800);
+set @inSelectColumnList = '';
+
+set nocount on;
+--Declare variables, housekeping
+declare @MachineName varchar(255);
+set @MachineName = cast (SERVERPROPERTY('MachineName') as varchar(800));
+declare @query varchar(4000);
+declare @queryOutput table (queryLine nvarchar(2000));
+if exists (select 1 from tempdb.dbo.sysobjects where name = '##mountPoints' and type in (N'u')) drop table ##mountPoints;
+if object_id('tempdb..#queryOutputfmt') is not null drop table #queryOutputfmt;
+create table #queryOutputfmt (Seq int identity(1,1), ID int, Parm varchar(200), Value varchar(1800));
+declare @dynCol as varchar(2000);
+declare @dynColNull as varchar(2000);
+declare @dynColTB table (colName varchar(80));
+declare @errormsg varchar(80);
+declare @SysAddDateTime datetime;
+set @SysAddDateTime = getdate();
+--default (custom) columns
+declare @selCols varchar(800);
+set @selCols = 'SystemName, FileSystem, Label, Name, TotalSpace_GB, FreeSpace_GB, FreeSpacePercent, DriveType ';
+
+if @inSelectColumnList is not null and @inSelectColumnList > ''
+	set @selCols = @inSelectColumnList;
+else
+begin
+	if not exists (select 1 from sys.objects where object_id = object_id(N'dbo.MountpointInfo') and type in (N'u'))
+	begin
+		create table dbo.MountpointInfo (
+			 ID int not null
+			,SystemName varchar(255) not null
+			,FileSystem varchar(255) null
+			,Label varchar(255) null
+			,Name varchar(255) null
+			,TotalSpace_GB decimal (12,3) null
+			,FreeSpace_GB decimal (12,3) null
+			,FreeSpacePercent decimal (8,2) null
+			,DriveType smallint null
+			,SysAddDateTime datetime not null,
+			constraint PK_MountpointInfo_ID primary key clustered 
+			(SysAddDateTime desc, ID asc, SystemName asc ) with (PAD_INDEX = OFF, STATISTICS_NORECOMPUTE = OFF, IGNORE_DUP_KEY = OFF, ALLOW_ROW_LOCKS = ON, ALLOW_PAGE_LOCKS = ON) on [PRIMARY]
+			) on [PRIMARY]
+	end
+end
+--Get WMI using xp_cmdshell, RPC availability etc
+set @query = '';
+set @query = 'mode con cols=255 && powershell.exe -c "$ErrorActionPreference = '+'''"Stop"'''+'; try {Get-WmiObject -class Win32_BIOS -ComputerName ' + quotename(@MachineName,'''') + ' -ErrorAction Stop  } Catch { $quit = '+'''quitting due to error: '''+'; $ErrorMessage = $_.Exception.Message; $FullName = $_.Exception.GetType().FullName; $FailedItem = $_.Exception.ItemName; $quit + $FailedItem + $ErrorMessage + $FullName; ; Break } finally { $ErrorActionPreference = '+'''"Stop"'''+'}"';
+insert into @queryOutput exec xp_cmdshell @query;
+if exists (select 1 from @queryOutput where substring(queryLine,1,4) = 'quit') 
+begin
+select top 1 @errormsg = queryLine from @queryOutput where substring(queryLine,1,4) = 'quit';
+print 'Message from Powershell query... ' + @errormsg;
+return;
+end
+--Get WMI using xp_cmdshell, win32
+delete from @queryOutput;
+set @query = '';
+set @query = 'mode con cols=255 && powershell.exe -c "Try { $i = 1; $aout = @() ; $dataFromServer = Get-WmiObject Win32_Volume -ComputerName  ' + quotename(@MachineName,'''') + '-Filter ''DriveType <> 5 '' | Select-Object * ; foreach ($currline in $dataFromServer) { if (-not $currline.Name.StartsWith(''\\'')) {$Seq = $i; add-member -InputObject $currline -MemberType NoteProperty -name Seq -Value $i; if ($currline.Capacity -gt 0) {[float]$tempfloat = ([long]$currline.Freespace) / ([long]$currline.Capacity)} else {[float]$tempfloat = ([long]$currline.Freespace)} ; $temppercent = [math]::round(($tempfloat * 100),2); [float]$TotalSpace_GB = [math]::round([long]$currline.Capacity / [long]1073741824, 2); [float]$FreeSpace_GB = [math]::round([long]$currline.Freespace / [long]1073741824, 2); add-member -InputObject $currline -MemberType NoteProperty -name FreeSpacePercent -value $temppercent; add-member -InputObject $currline -MemberType NoteProperty -name TotalSpace_GB -value $TotalSpace_GB; add-member -InputObject $currline -MemberType NoteProperty -name FreeSpace_GB -value $FreeSpace_GB; $aout = $aout + $currline; $i++; }} ; $aout | select-object  '+@selCols+' | format-list }Catch { $quit = '+'''quitting due to error: '''+'; $ErrorMessage = $_.Exception.Message; $FullName = $_.Exception.GetType().FullName; $FailedItem = $_.Exception.ItemName; $quit + $FailedItem + $ErrorMessage + $FullName; Break }"';
+--Execute xp_cmdshell and capture volume info
+insert into @queryOutput exec xp_cmdshell @query;
+if exists (select 1 from @queryOutput where substring(queryLine,1,4) = 'quit') 
+begin
+select top 1 @errormsg = queryLine from @queryOutput where substring(queryLine,1,4) = 'quit';
+print 'Message from Powershell query... ' + @errormsg;
+return;
+end
+
+--Format resultset and load data into local temp table
+insert into #queryOutputfmt (Parm, Value)
+select SUBSTRING(queryLine,1,CHARINDEX(':',queryLine)-2),SUBSTRING(queryLine,CHARINDEX(':',queryLine)+2,(len(queryLine)-CHARINDEX(':',queryLine)))
+from @queryOutput
+where queryline is not null;
+--Prepare data for Pivot
+--Part 1: Identify each set of volume info
+update #queryOutputfmt set ID = ((Seq -1) / (select count(distinct Parm) from #queryOutputfmt)) + 1;
+--Part 2: Remove Seq from header and its corresponding values
+delete from #queryOutputfmt where Parm = 'Seq';
+--List available headers in order to get pivot columns
+insert into @dynColTB select distinct Parm from #queryOutputfmt;
+--Prepare dynamic column list for Pivot query
+select @dynCol = stuff((select distinct top 100 percent ', [' + t1.colName +']'
+from @dynColTB as t1
+for xml path('')), 1, 2, '') + '';
+--Prepare dynamic column list for Pivot query
+select @dynColNull = stuff((select distinct top 100 percent ', isnull([' + t1.colName +'],'''') as ['+t1.colName+']'
+from @dynColTB as t1
+for xml path('')), 1, 2, '') + '';
+--Prepare Pivot query
+set @query = '';
+
+if @inSelectColumnList is not null and @inSelectColumnList > ''
+begin
+	set @query = N'select * into ##mountPoints from   
+	(SELECT ID, '+ @dynColNull + ' from 
+	(select ID, Parm, Value from #queryOutputfmt) src1 
+	pivot ' + '(min([Value]) for Parm in ( '+ @dynCol +' ) ) as pvt1) as t111;';
+--Execute Pivot query
+	exec(@query);
+--Select Mountpoint Data. Remember to cast with appropriate data type in order to use in where predicate
+--Final data can be loaded into a base table as well
+	select * from ##mountPoints order by Name;
+end
+else
+begin
+--Clear old data from base table for same sql instance
+	delete from dbo.MountpointInfo --where SystemName = @MachineName; 
+--Load Mountpoint Data into base table
+	insert into dbo.MountpointInfo (ID, SystemName, FileSystem, Label, Name, TotalSpace_GB, FreeSpace_GB, FreeSpacePercent, DriveType, SysAddDateTime)
+	SELECT ID, SystemName, FileSystem, Label, Name, TotalSpace_GB, FreeSpace_GB, FreeSpacePercent, DriveType, SysAddDateTime from 
+	(select ID, Parm, Value, SysAddDateTime = @SysAddDateTime from #queryOutputfmt) src1 
+	pivot (min([Value]) for Parm in ( SystemName, FileSystem, Label, Name, TotalSpace_GB, FreeSpace_GB, FreeSpacePercent, DriveType ) ) as pvt1;
+--Select Mountpoint Data from base table
+	select ID, SystemName, FileSystem, Label, Name, TotalSpace_GB, FreeSpace_GB, FreeSpacePercent, DriveType, SysAddDateTime from dbo.MountpointInfo  order by Name;
+end

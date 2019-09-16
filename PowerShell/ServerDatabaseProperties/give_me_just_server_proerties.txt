@@ -1,0 +1,8 @@
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+$serverX = new-object "Microsoft.SqlServer.Management.Smo.Server" server
+foreach ($db in $serverX.Databases) {$a1 = ($db.properties | where {$_.name -eq "MirroringRole"}  | select-object value);  $db.name  +'   '+  $a1.value}
+foreach ($db in $serverX.Databases){$DBs = $db | select-object ID, Name, IsSystemObject, IsAccessible, Status, RecoveryModel, IsDatabaseSnapshot, ReplicationOptions, MirroringRole, MirroringStatus, MirroringPartnerInstance |sort-object -property Name; $dbs}
+
+
+
+

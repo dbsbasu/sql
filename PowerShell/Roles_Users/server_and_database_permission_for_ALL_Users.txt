@@ -1,0 +1,289 @@
+if (Test-Path C:\PowerTemp)
+{ " " }
+else
+{ new-item -path C:\PowerTemp -type directory }
+
+$x_confirm = @("")
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
+
+$objForm = New-Object System.Windows.Forms.Form 
+$objForm.Text = "Obtain User Permissions"
+$objForm.Size = New-Object System.Drawing.Size(300,200) 
+$objForm.StartPosition = "CenterScreen"
+
+$objForm.KeyPreview = $True
+$objForm.Add_KeyDown({if ($_.KeyCode -eq "Enter") 
+    {$x_confirm="1";$objForm.Close()}})
+$objForm.Add_KeyDown({if ($_.KeyCode -eq "Escape") 
+    {$objForm.Close()}})
+
+$OKButton = New-Object System.Windows.Forms.Button
+$OKButton.Location = New-Object System.Drawing.Size(75,120)
+$OKButton.Size = New-Object System.Drawing.Size(75,23)
+$OKButton.Text = "OK"
+$OKButton.Add_Click({$x_confirm="1";$objForm.Close()})
+$objForm.Controls.Add($OKButton)
+
+$CancelButton = New-Object System.Windows.Forms.Button
+$CancelButton.Location = New-Object System.Drawing.Size(150,120)
+$CancelButton.Size = New-Object System.Drawing.Size(75,23)
+$CancelButton.Text = "Cancel"
+$CancelButton.Add_Click({$x_confirm = "0";$objForm.Close()})
+$objForm.Controls.Add($CancelButton)
+
+$objLabel1 = New-Object System.Windows.Forms.Label
+$objLabel1.Location = New-Object System.Drawing.Size(10,40) 
+$objLabel1.Size = New-Object System.Drawing.Size(180,20) 
+$objLabel1.Text = "Input File: C:\Srv_in.txt"
+$objForm.Controls.Add($objLabel1) 
+
+$objForm.Topmost = $True
+
+$objForm.Add_Shown({$objForm.Activate()})
+[void] $objForm.ShowDialog()
+
+if ($x_confirm -ne "1") { $msg = "exiting...";
+$msg;
+exit
+}
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")
+$instances = get-content C:\Srv_in.txt
+ForEach($InstanceName in $instances) 
+{
+$server = new-object “Microsoft.SqlServer.Management.Smo.Server” $InstanceName
+
+$SqlConnectionM = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionM.ConnectionString = "Server='$InstanceName';Initial Catalog=master;Integrated Security=True"
+$SqlCmdM = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdM.CommandText = " 
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##Users'
+AND type in (N'U'))
+DROP TABLE ##Users;
+
+select  
+sid,
+loginname AS [Login_Name],
+dbname AS [Default_Database],
+CASE isntname
+WHEN 1 THEN 'AD_Login'
+ELSE 'SQL_Login'
+END AS [Login_Type],
+CASE
+WHEN isntgroup = 1 THEN 'AD_Group'
+WHEN isntuser = 1 THEN 'AD_User'
+ELSE ' -n/a- '
+END AS [AD_Login_Type],
+CASE sysadmin
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [sysadmin],
+CASE [securityadmin]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [securityadmin],
+CASE [serveradmin]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [serveradmin],
+CASE [setupadmin]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [setupadmin],
+CASE [processadmin]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [processadmin],
+CASE [diskadmin]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [diskadmin],
+CASE [dbcreator]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [dbcreator],
+CASE [bulkadmin]
+WHEN 1 THEN 'Yes'
+ELSE 'No'
+END AS [bulkadmin]
+INTO ##Users
+from master.dbo.syslogins;
+select '$InstanceName' as InstanceName,
+* 
+from ##users u;
+"
+$SqlCmdM.Connection = $SqlConnectionM
+$SqlCmdM.CommandTimeout = 0
+$SqlAdapterM = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterM.SelectCommand = $SqlCmdM
+$DataSetM = New-Object System.Data.DataSet
+$SqlAdapterM.Fill($DataSetM) | Out-Null
+$SqlConnectionM.Close()
+$outdata = $outdata + $DataSetM.Tables[0]
+
+
+foreach ($db in $server.Databases)
+{
+$db1 = $db.name
+$db1 = $db.name
+if ($db1 -ne "master" -and $db1 -ne "model" -and $db1 -ne "tempdb" -and $db1 -ne "DBAUtils") {
+$SqlConnection = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnection.ConnectionString = "Server='$InstanceName';Initial Catalog='$db1';Integrated Security=True"
+
+$SqlCmd = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd.CommandText = " 
+SELECT '$InstanceName' as InstanceName, 
+'$db1' as DatabaseName, 
+su.[name] AS [Database_User_ID], 
+COALESCE (u.[Login_Name], '** Orphaned **') AS [Server_Login], 
+COALESCE (sug.name, 'Public') AS [Database_Role],  
+u.[Login_Type] AS [Login_Type], 
+u.[AD_Login_Type] AS [AD_Login_Type] 
+FROM [dbo].[sysusers] su        
+LEFT OUTER JOIN ##Users u            
+ON su.sid = u.sid        
+LEFT OUTER JOIN ([dbo].[sysmembers] sm 
+INNER JOIN [dbo].[sysusers] sug 
+ON sm.groupuid = sug.uid)            
+ON su.uid = sm.memberuid     
+WHERE su.hasdbaccess = 1      
+AND su.[name] != 'dbo' ;
+"
+
+
+$SqlCmd.Connection = $SqlConnection
+$SqlCmd.CommandTimeout = 0
+$SqlAdapter = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter.SelectCommand = $SqlCmd
+$DataSet = New-Object System.Data.DataSet
+$SqlAdapter.Fill($DataSet) | Out-Null
+
+$SqlCmd2 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd2.CommandText = "
+DECLARE @storeRoles table 
+(
+ Database_Role		VARCHAR(80)
+);
+
+insert into @storeRoles (Database_Role)
+SELECT distinct COALESCE (sug.name, 'Public') AS [Database_Role]
+FROM [dbo].[sysusers] su        
+inner JOIN ##Users u            
+ON su.sid = u.sid        
+and u.[Login_Name] is not NULL
+LEFT OUTER JOIN ([dbo].[sysmembers] sm 
+INNER JOIN [dbo].[sysusers] sug 
+ON sm.groupuid = sug.uid)            
+ON su.uid = sm.memberuid     
+WHERE su.hasdbaccess = 1      
+AND su.[name] != 'dbo';
+
+
+SELECT '$InstanceName' as InstanceName, '$db1' as DatabaseName, 
+grantee_principal.name as [Grantee], grantee_principal.type_desc as [GranteeType], 
+prmssn.permission_name as Securables, coalesce(schema_name(prmssn.major_id), schema_name(obj.schema_id)+'.'+object_name(prmssn.major_id), db_name(prmssn.major_id)) as Target_Object, coalesce(obj.type_desc,prmssn.class_desc) as Target_Class,
+prmssn.permission_name as [Permission], prmssn.state_desc as [PermissionState]
+FROM  sys.database_permissions AS prmssn
+INNER JOIN sys.database_principals AS grantee_principal 
+ON grantee_principal.principal_id = prmssn.grantee_principal_id
+left outer JOIN sys.all_objects AS obj 
+ON obj.object_id = prmssn.major_id and prmssn.class = 1
+left outer join sys.schemas sc 
+on sc.schema_id = prmssn.major_id
+inner join @storeRoles strRoles
+on grantee_principal.name = strRoles.Database_Role
+where grantee_principal.name not in ('guest', 'public')
+and grantee_principal.type = 'R'
+and prmssn.permission_name <> 'CONNECT'
+order by [Grantee], [GranteeType], [Securables], [Target_Object];
+"
+
+$SqlCmd2.Connection = $SqlConnection
+$SqlCmd2.CommandTimeout = 0
+$SqlAdapter2 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter2.SelectCommand = $SqlCmd2
+$DataSet2 = New-Object System.Data.DataSet
+$SqlAdapter2.Fill($DataSet2) | Out-Null
+
+$SqlCmd3 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd3.CommandText = "
+DECLARE @storeRoles table 
+(
+ Database_Role		VARCHAR(80)
+);
+
+insert into @storeRoles (Database_Role)
+SELECT distinct COALESCE (sug.name, 'Public') AS [Database_Role]
+FROM [dbo].[sysusers] su        
+inner JOIN ##Users u            
+ON su.sid = u.sid        
+and u.[Login_Name] is not NULL
+LEFT OUTER JOIN ([dbo].[sysmembers] sm 
+INNER JOIN [dbo].[sysusers] sug 
+ON sm.groupuid = sug.uid)            
+ON su.uid = sm.memberuid     
+WHERE su.hasdbaccess = 1      
+AND su.[name] != 'dbo' ;
+
+SELECT '$InstanceName' as InstanceName, '$db1' as DatabaseName, 
+grantee_principal.name as [Grantee], grantee_principal.type_desc as [GranteeType], schema_name(obj.schema_id) AS [Schema], obj.name AS [ObjectName], obj.type_desc as [ObjectType], prmssn.permission_name as [Permission], prmssn.state_desc as [PermissionState]
+FROM  sys.database_permissions AS prmssn
+INNER JOIN sys.database_principals AS grantee_principal 
+ON grantee_principal.principal_id = prmssn.grantee_principal_id
+INNER JOIN sys.all_objects AS obj 
+ON obj.object_id = prmssn.major_id and prmssn.class = 1
+inner join [dbo].[sysusers] su
+on grantee_principal.name = su.name
+inner join ##Users u            
+ON su.sid = u.sid        
+WHERE su.hasdbaccess = 1      
+AND su.[name] != 'dbo' 
+And grantee_principal.name not in ('guest', 'public')
+order by grantee_principal.name, [Schema], obj.name;
+"
+
+$SqlCmd3.Connection = $SqlConnection
+$SqlCmd3.CommandTimeout = 0
+$SqlAdapter3 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter3.SelectCommand = $SqlCmd3
+$DataSet3 = New-Object System.Data.DataSet
+$SqlAdapter3.Fill($DataSet3) | Out-Null
+
+$SqlConnection.Close()
+$outdataDB = $outdataDB + $DataSet.Tables[0]
+$outdataDBI = $outdataDBI + $DataSet3.Tables[0]
+$outdataDBR = $outdataDBR + $DataSet2.Tables[0]
+}
+
+$SqlConnectionM2 = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionM2.ConnectionString = "Server='$InstanceName';Initial Catalog=master;Integrated Security=True"
+$SqlCmdM2 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdM2.CommandText = " 
+IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##Users'
+AND type in (N'U'))
+DROP TABLE ##Users;
+"
+
+$SqlCmdM2.Connection = $SqlConnectionM2
+$SqlCmdM2.CommandTimeout = 0
+$SqlAdapterM2 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterM2.SelectCommand = $SqlCmdM2
+$SqlConnectionM.Close()
+}
+}
+$outdata | Export-Csv -NoType C:\PowerTemp\Server_Login_Permissions.csv
+Invoke-Expression C:\PowerTemp\Server_Login_Permissions.csv
+
+$outdataDB | Export-Csv -NoType C:\PowerTemp\Database_User_Permissions.csv
+Invoke-Expression C:\PowerTemp\Database_User_Permissions.csv
+
+$outdataDBI | Export-Csv -NoType C:\PowerTemp\Object_Level_User_Permissions.csv
+Invoke-Expression C:\PowerTemp\Object_Level_User_Permissions.csv
+
+$outdataDBR | Export-Csv -NoType C:\PowerTemp\Database_Roles_Defn.csv
+Invoke-Expression C:\PowerTemp\Database_Roles_Defn.csv
+
+
+
+

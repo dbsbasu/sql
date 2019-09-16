@@ -1,0 +1,329 @@
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+ 
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "z1_Instance_DB_Job_only_SMO: Started at $STARTsysdatetime" 
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "$sysdatetime : Retrieving data from source "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT InstanceNam, PortNum
+FROM [Inventory].[mytable]
+WHERE --Instance_Pri_Env = 'PD' and
+   (DBMSVer like '10%'
+   or DBMSVer like '9%')
+;
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+$outdata1 = $DataSet1.Tables[0]
+
+#--get Instance_DB_TLog_File_ and subsequently add them ======>
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object InstanceNam, PortNum
+$totCnt = $array15.count
+write-host -foregroundcolor green "TOTAL Qualified Instances: $totCnt "
+foreach ($row15 in $array15[0..1000])
+{  
+ $InsX = $row15.InstanceNam
+ $PortNum = $row15.PortNum
+ $InsX_port = $InsX+','+$PortNum
+ $sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+ $counterA = $counterA + 1
+ $serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+
+ write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+
+
+ $DBsOut = @("")
+ foreach ($db in $serverX.Databases)
+ {
+  $dbNam = $db.Name
+  if ($db.IsSystemObject -match "False" -and $db.Name -ne "dbaUtils")
+  {
+   $DBs = $db | select Name, ID, RecoveryModel
+   $DBsOut = $DBsOut + $DBs
+  }
+  $DBFilesOut = @("")
+  if (($db.IsSystemObject -match "False" -or $db.Name -eq "TempDB") -and $db.Name -ne "dbaUtils")
+  {
+   if ($db.Status -eq "Normal" -and $db.IsAccessible -eq "True")
+   {
+    foreach ($fg in $db.filegroups) 
+    {
+     $FGNam = $fg.Name
+     foreach ($file in $fg.files) 
+     {
+      [float]$FileSize_GB1 = [math]::round([long]$file.Size/[long]1024000,3); 
+      #$FileSize_GB = "{0,11:N3}" -f $FileSize_GB1
+      $FileSize_GB = $FileSize_GB1
+      [float]$SpaceUsed_GB1 = [math]::round([long]$file.UsedSpace/[long]1024000,3)
+      #$SpaceUsed_GB = "{0,11:N3}" -f $SpaceUsed_GB1
+      $SpaceUsed_GB = $SpaceUsed_GB1
+      $SpaceFree = ($file.Size - $file.UsedSpace)
+      [float]$SpaceFree_GB1 = [math]::round([long]$SpaceFree/[long]1024000,3); 
+      #$SpaceFree_GB = "{0,11:N3}" -f $SpaceFree_GB1
+      $SpaceFree_GB = $SpaceFree_GB1
+      if ($file.Size -gt "0")
+      {
+       [float]$tempfloat = ([long]$SpaceFree / [long]$file.Size)
+       $PercentFreeF1 = [math]::round(($tempfloat * 100),2)
+       #$PercentFree = "{0,11:N2}" -f $PercentFreeF1
+       $PercentFree = $PercentFreeF1
+      }
+      else
+      {$PercentFree = 0}
+      add-member -InputObject $file -MemberType NoteProperty -Name FGNam -value "$FGNam" -force
+      add-member -InputObject $file -MemberType NoteProperty -name FileSize_GB -value "$FileSize_GB" -force
+      ##add-member -InputObject $file -MemberType NoteProperty -name SpaceUsed_GB -value "$SpaceUsed_GB" -force
+      add-member -InputObject $file -MemberType NoteProperty -name SpaceFree_GB -value "$SpaceFree_GB" -force
+      add-member -InputObject $file -MemberType NoteProperty -name PercentFree -value "$PercentFree" -force
+      $DBFilesOut = $DBFilesOut + $file
+     } #file
+    } #fg
+    foreach ($log in $db.logfiles) 
+    {
+     [float]$LogSize_GB1 = [math]::round([long]$log.Size/[long]1024000,3)
+     #$LogSize_GB = "{0,11:N3}" -f $LogSize_GB1
+     $LogSize_GB = $LogSize_GB1
+     add-member -InputObject $log -MemberType NoteProperty -name FGNam -value "TranLog" -force
+     add-member -InputObject $log -MemberType NoteProperty -name FileSize_GB -value "$LogSize_GB" -force
+     ##add-member -InputObject $log -MemberType NoteProperty -name SpaceUsed_GB -value 0 -force
+     add-member -InputObject $log -MemberType NoteProperty -name SpaceFree_GB -value 0 -force
+     add-member -InputObject $log -MemberType NoteProperty -name PercentFree -value 0 -force
+     $DBFilesOut = $DBFilesOut + $log
+    } #log
+    $DB_FL = @()
+    $DB_FL = $DBFilesOut| select-object FGNam, Name, FileName, FileSize_GB, SpaceFree_GB, PercentFree
+   
+#--add DB File ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Adding collected Instance data " | Out-File C:\PowerTemp\Instance_DB_TLog_File_Skipped_DBs.txt -append
+$SqlConnectionDBFile = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionDBFile.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+   
+$arrayFile = $DB_FL | select-object FGNam, Name, FileName, FileSize_GB, SpaceFree_GB, PercentFree
+foreach ($Filerow in $arrayFile)
+{  
+$FGNam = $Filerow.FGNam
+$Name = $Filerow.Name
+$FileName = $Filerow.FileName
+$FileSize_GB = $Filerow.FileSize_GB
+$SpaceFree_GB = $Filerow.SpaceFree_GB
+$PercentFree = $Filerow.PercentFree
+if ($InsX -gt " " -and $DBNam -gt " " -and $FGNam -gt " " -and $FileName -gt " ")
+{  
+$SqlCmdDBFile = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdDBFile.CommandText = " 
+insert into [Inventory].[Instance_DB_File] ([InstanceNam]
+      ,[DBNam]
+      ,[FGNam]
+      ,[Logical_File]
+      ,[Physical_File]
+      ,[FileSize_GB]
+      ,[SpaceFree_GB]
+      ,[PercentFree])
+      values ('$InsX'
+      ,'$DBNam'
+      ,'$FGNam'
+      ,'$Name'
+      ,'$FileName'
+      ,$FileSize_GB
+      ,$SpaceFree_GB
+      ,$PercentFree);
+"  
+$SqlCmdDBFile.Connection = $SqlConnectionDBFile
+$SqlCmdDBFile.CommandTimeout = 0
+$SqlAdapterDBFile = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterDBFile.SelectCommand = $SqlCmdDBFile
+$DataSetDBFile = New-Object System.Data.DataSet
+$SqlAdapterDBFile.Fill($DataSetDBFile) | Out-Null
+}  
+}  
+$SqlConnectionDBFile.Close()
+    
+   } #status
+  } #systemOb
+ } #db
+$SqlConnectionDBs = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionDBs.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+$DBsOut_Sel = @()
+$DBsOut_Sel = $DBsOut  | select Name, ID, RecoveryModel
+foreach ($DBRow in $DBsOut_Sel)
+{  
+$databasename = $DBrow.name
+if ($InsX -gt " " -and $databasename -gt " ")
+{  
+$DBID = $DBrow.DBID
+$recovery_model = $DBrow.RecoveryModel
+$SqlCmdDBs = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdDBs.CommandText = " 
+insert into [Inventory].[Recovery_Model_Data] ([InstanceNam]
+      ,[DBID]
+      ,[DBNam]
+      ,[recovery_model])
+      values ('$InsX'
+      ,'$DBID'
+      ,'$databasename'
+      ,'$recovery_model');
+"
+$SqlCmdDBs.Connection = $SqlConnectionDBs
+$SqlCmdDBs.CommandTimeout = 0
+$SqlAdapterDBs = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterDBs.SelectCommand = $SqlCmdDBs
+$DataSetDBs = New-Object System.Data.DataSet
+$SqlAdapterDBs.Fill($DataSetDBs) | Out-Null
+}
+}
+$SqlConnectionDBs.Close()
+
+
+ 
+ foreach ($jobs in $serverX.jobserver) 
+ {
+  foreach($job in $jobs.jobs) 
+  {
+   $JobNam = $job.Name
+   $JobEnabled = $job.IsEnabled
+   $jobsOut = @("")
+   foreach($jobSchedule in $job.JobSchedules) 
+   {
+    $jobsOut = $jobsOut + $jobSchedule
+   } #schedule
+   $jobsOut_Sel = @()
+   $jobsOut_Sel = $jobsOut | select-object ID, IsEnabled, FrequencyTypes, FrequencyInterval, FrequencySubDayTypes, FrequencySubDayInterval, FrequencyRelativeIntervals, ActiveStartTimeOfDay, ActiveEndTimeOfDay, Name
+#--add jobs ==>
+$SqlConnectionInsJobDet = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionInsJobDet.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+foreach ($InsJobsrow in $jobsOut_Sel)
+{  
+$schedule_id = $InsJobsrow.ID
+if ($InsX -gt " " -and $JobNam -gt " " -and $schedule_id -ge 0)
+{  
+$schedule_Enabled = $InsJobsrow.IsEnabled
+$freq_type = $InsJobsrow.FrequencyTypes
+$freq_interval = $InsJobsrow.FrequencyInterval
+$freq_subday_type = $InsJobsrow.FrequencySubDayTypes
+$freq_subday_interval = $InsJobsrow.FrequencySubDayInterval
+$freq_relative_interval = $InsJobsrow.FrequencyRelativeIntervals
+$active_start_time = $InsJobsrow.ActiveStartTimeOfDay
+$active_end_time = $InsJobsrow.ActiveEndTimeOfDay
+$User_def_Schedule_Name = $InsJobsrow.Name
+$SqlCmdInsJobs = New-Object System.Data.SqlClient.SqlCommand
+  
+$SqlCmdInsJobs.CommandText = " 
+insert into [Inventory].[Job_Schedule] (
+ InstanceNam
+,JobNam
+,JobEnabled
+,schedule_id
+,schedule_Enabled
+,freq_type
+,freq_interval
+,freq_subday_type
+,freq_subday_interval
+,freq_relative_interval
+,active_start_time
+,active_end_time
+,User_def_Schedule_Name
+) 
+     values (
+ '$InsX'
+,'$JobNam'
+,'$JobEnabled'
+,'$schedule_id'
+,'$schedule_Enabled'
+,'$freq_type'
+,'$freq_interval'
+,'$freq_subday_type'
+,'$freq_subday_interval'
+,'$freq_relative_interval'
+,'$active_start_time'
+,'$active_end_time'
+,'$User_def_Schedule_Name'
+      );
+"   
+$SqlCmdInsJobs.Connection = $SqlConnectionInsJobDet
+$SqlCmdInsJobs.CommandTimeout = 0
+$SqlAdapterInsJobDet = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterInsJobDet.SelectCommand = $SqlCmdInsJobs
+$DataSetInsJobDet = New-Object System.Data.DataSet
+$SqlAdapterInsJobDet.Fill($DataSetInsJobDet) | Out-Null
+}  
+}  
+$SqlConnectionInsJobDet.Close()
+  
+  } #job
+ } #jobserver
+
+} #instance
+
+
+
+
+#--update Instance File Letter ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : updating collected Instance data " | Out-File C:\PowerTemp\Instance_DB_TLog_File_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : updating collected Instance data "
+$SqlConnectionDBFile2 = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionDBFile2.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+$SqlCmdDBFile2 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdDBFile2.CommandText = " 
+declare @Find char(1);
+set @Find = '\';
+update  Inventory.Instance_DB_File
+set PhysicalPath = (SELECT CASE WHEN @Find IS NULL THEN NULL ELSE 
+COALESCE(substring(Physical_File, 1, NullIf(len(Physical_File)-CHARINDEX(reverse(@Find), REVERSE(Physical_File)), 0)+1), Physical_File) END);
+
+update  Inventory.Instance_DB_File
+set PhysicalFileName = (SELECT CASE WHEN @Find IS NULL THEN NULL ELSE 
+COALESCE(substring(Physical_File, NullIf(len(Physical_File)-CHARINDEX(reverse(@Find), REVERSE(Physical_File)), 0)+2,999), Physical_File) END);
+
+update Inventory.Job_Schedule set freq_interval = 
+case freq_type + freq_interval
+	when 'OneTime' + freq_interval then freq_interval+'-Unused'
+	when 'Daily' + freq_interval then 'Every '+freq_interval+' day(s)'
+	when 'Weekly' + '1' then freq_interval+'=Sunday'
+	when 'Weekly' + '2' then freq_interval+'=Monday'
+	when 'Weekly' + '4' then freq_interval+'=Tuesday'
+	when 'Weekly' + '8' then freq_interval+'=Wedday'
+	when 'Weekly' + '16' then freq_interval+'=Thursday'
+	when 'Weekly' + '32' then freq_interval+'=Friday'
+	when 'Weekly' + '64' then freq_interval+'=Saturday'
+	when 'Monthly' + freq_interval then 'On the '+ freq_interval +' day of the month'
+	when 'MonthlyRelative' + '1' then freq_interval+'=Sunday'
+	when 'MonthlyRelative' + '2' then freq_interval+'=Monday'
+	when 'MonthlyRelative' + '3' then freq_interval+'=Tuesday'
+	when 'MonthlyRelative' + '4' then freq_interval+'=Wedday'
+	when 'MonthlyRelative' + '5' then freq_interval+'=Thursday'
+	when 'MonthlyRelative' + '6' then freq_interval+'=Friday'
+	when 'MonthlyRelative' + '7' then freq_interval+'=Saturday'
+	when 'MonthlyRelative' + '8' then freq_interval+'=Day'
+	when 'MonthlyRelative' + '9' then freq_interval+'=Week day'
+	when 'MonthlyRelative' + '10' then freq_interval+'=Weekend day'
+	when 'AutoStart' + freq_interval then freq_interval+'=Unused'
+	else freq_interval 
+ end;
+"
+$SqlCmdDBFile2.Connection = $SqlConnectionDBFile2
+$SqlCmdDBFile2.CommandTimeout = 0
+$SqlAdapterDBFile2 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterDBFile2.SelectCommand = $SqlCmdDBFile2
+$DataSetDBFile2 = New-Object System.Data.DataSet
+$SqlAdapterDBFile2.Fill($DataSetDBFile2) | Out-Null
+$SqlConnectionDBFile2.Close()
+
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+
+

@@ -1,0 +1,127 @@
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"c1_Ins_JobBackupType: Started at $STARTsysdatetime" | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "c1_Ins_JobBackupType: Started at $STARTsysdatetime" 
+
+
+#--get Qualified Instance Names info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Retrieving data from source " | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Retrieving data from source "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='server';Initial Catalog='mydb';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT InstanceNam, PortNum
+FROM [Inventory].[mytable]
+WHERE --Instance_Pri_Env = 'PD' and
+  (DBMSVer like '10%'
+   or DBMSVer like '9%')
+order by instancenam
+;
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+
+$outdata1 = $DataSet1.Tables[0]
+
+
+#--get Job info and subsequently add them ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Traversing qualified Instances " | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object InstanceNam, PortNum
+$totCnt = $array15.count
+write-host -foregroundcolor green "TOTAL Qualified Instances: $totCnt "
+foreach ($row15 in $array15[0..1000])
+{
+$InsX = $row15.InstanceNam
+$PortNum = $row15.PortNum
+$InsX_port = $InsX+','+$PortNum
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime $counterA Instance: $InsX_port ==> WIP" | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+$counterA = $counterA + 1
+$serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+$SqlConnectionInsX = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionInsX.ConnectionString = "Server='$InsX_port';Initial Catalog='utils';Integrated Security=True"
+
+$SqlCmdInsY = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdInsY.CommandText = " 
+
+select '$InsX' as InstanceNam, DBName, BackupType 
+from dbo.BackupLog bkl
+where bkl.StartTime = (Select max(bkl2.StartTime)
+from dbo.BackupLog bkl2
+where bkl2.DBName = bkl.DBName)
+order by bkl.DBName
+;
+ "
+ $SqlCmdInsY.Connection = $SqlConnectionInsX
+ $SqlCmdInsY.CommandTimeout = 0
+ $SqlAdapterInsY = New-Object System.Data.SqlClient.SqlDataAdapter
+ $SqlAdapterInsY.SelectCommand = $SqlCmdInsY
+ $DataSetInsY = New-Object System.Data.DataSet
+ $SqlAdapterInsY.Fill($DataSetInsY) | Out-Null
+
+
+$SqlConnectionInsX.Close()
+$outdataInsY = $outdataInsY + $DataSetInsY.Tables[0]
+
+}
+
+
+
+#--add Job Info Details ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Adding collected Instance data (BackupType) " | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Adding collected Instance data (utils) "
+$SqlConnectionInsJobDet = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionInsJobDet.ConnectionString = "Server='server';Initial Catalog='mydb';Integrated Security=True"
+
+$arrayInsBackupType = $outdataInsY | select-object InstanceNam, DBName, BackupType
+foreach ($InsBackupTyperow in $arrayInsBackupType)
+{
+$InstanceNam = $InsBackupTyperow.InstanceNam
+if ($InstanceNam -gt " ")
+{
+
+$InstanceNam = $InsBackupTyperow.InstanceNam
+$DBNam = $InsBackupTyperow.DBName
+$BackupType = $InsBackupTyperow.BackupType
+
+$SqlCmdInsBackupType = New-Object System.Data.SqlClient.SqlCommand
+
+$SqlCmdInsBackupType.CommandText = " 
+insert into [Inventory].[Backup_Type] (
+ InstanceNam, DBNam, BackupType
+)
+     values (
+ '$InstanceNam'
+,'$DBNam'
+,'$BackupType'
+      );
+"
+$SqlCmdInsBackupType.Connection = $SqlConnectionInsJobDet
+$SqlCmdInsBackupType.CommandTimeout = 0
+$SqlAdapterInsBackupType = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterInsBackupType.SelectCommand = $SqlCmdInsBackupType
+$DataSetInsBackupType = New-Object System.Data.DataSet
+$SqlAdapterInsBackupType.Fill($DataSetInsBackupType) | Out-Null
+}
+}
+
+$SqlConnectionInsJobDet.Close()
+$outdataInsY = @()
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"Completed at $ENDsysdatetime" | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+

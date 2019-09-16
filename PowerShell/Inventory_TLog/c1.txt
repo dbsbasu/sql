@@ -1,0 +1,154 @@
+if (Test-Path C:\PowerTemp) { " " }
+else { new-item -path C:\PowerTemp -type directory }
+
+if (Test-Path C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt) { ri C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt }
+else { " " }
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"c1_Ins_JobHistory: Started at $STARTsysdatetime" | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "c1_Ins_JobHistory: Started at $STARTsysdatetime" 
+
+
+#--get Qualified Instance Names info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Retrieving data from source " | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Retrieving data from source "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT InstanceNam, PortNum
+FROM [Inventory].[mytable1]
+WHERE --Instance_Pri_Env = 'PD' and
+  (DBMSVer like '10%'
+   or DBMSVer like '9%')
+;
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+
+$outdata1 = $DataSet1.Tables[0]
+
+
+#--get Job info and subsequently add them ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Traversing qualified Instances " | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object InstanceNam, PortNum
+$totCnt = $array15.count
+write-host -foregroundcolor green "TOTAL Qualified Instances: $totCnt "
+foreach ($row15 in $array15[0..1000])
+{
+$InsX = $row15.InstanceNam
+$PortNum = $row15.PortNum
+$InsX_port = $InsX+','+$PortNum
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime $counterA Instance: $InsX_port ==> WIP" | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+$counterA = $counterA + 1
+$serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+$SqlConnectionInsX = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionInsX.ConnectionString = "Server='$InsX_port';Initial Catalog='msdb';Integrated Security=True"
+
+$SqlCmdInsY = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdInsY.CommandText = " 
+select t1.InstanceNam, t1.JobNam, t1.HIST_run_date, t1.HIST_run_time, t1.HIST_run_duration
+from 
+(SELECT 
+ '$InsX' as InstanceNam 
+,job.[name] as JobNam
+,hist.run_date as HIST_run_date
+,SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),1,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),3,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_time as varchar(6)),6),5,2) as HIST_run_time  
+,SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),1,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),3,2)+':'+SUBSTRING(right(cast('000000' as varchar(6))+cast(hist.run_duration as varchar(6)),6),5,2) as HIST_run_duration
+,RANK() over (partition by job.name order by hist.run_date desc, hist.run_time desc, hist.job_id asc) as rank1
+  FROM msdb.dbo.sysjobs job with (nolock)
+  inner join msdb.dbo.sysjobhistory hist with (nolock)
+  on hist.job_id = job.job_id
+  and hist.step_id = 1
+  and hist.run_status = 1
+  and job.[enabled] = 1
+  and hist.run_date <= (select max(hist2.run_date)
+						from msdb.dbo.sysjobhistory hist2  with (nolock)
+						where hist2.job_id = hist.job_id
+						and   hist2.step_id = hist.step_id
+						and   hist2.run_status = hist.run_status)
+) as t1
+where t1.rank1 <= 5
+order by t1.InstanceNam, t1.JobNam, t1.HIST_run_date, t1.HIST_run_time;
+ "
+ $SqlCmdInsY.Connection = $SqlConnectionInsX
+ $SqlCmdInsY.CommandTimeout = 0
+ $SqlAdapterInsY = New-Object System.Data.SqlClient.SqlDataAdapter
+ $SqlAdapterInsY.SelectCommand = $SqlCmdInsY
+ $DataSetInsY = New-Object System.Data.DataSet
+ $SqlAdapterInsY.Fill($DataSetInsY) | Out-Null
+
+
+$SqlConnectionInsX.Close()
+$outdataInsY = $outdataInsY + $DataSetInsY.Tables[0]
+
+}
+
+
+
+#--add Job Info Details ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Adding collected Instance data (History) " | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Adding collected Instance data (History) "
+$SqlConnectionInsJobDet = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionInsJobDet.ConnectionString = "Server='myserver';Initial Catalog='mydb';Integrated Security=True"
+
+$arrayInsHist = $outdataInsY | select-object InstanceNam, JobNam, HIST_run_date, HIST_run_time, HIST_run_duration
+foreach ($InsHistrow in $arrayInsHist)
+{
+$InstanceNam = $InsHistrow.InstanceNam
+if ($InstanceNam -gt " ")
+{
+$JobNam = $InsHistrow.JobNam
+$HIST_run_date = $InsHistrow.HIST_run_date
+$HIST_run_time = $InsHistrow.HIST_run_time
+$HIST_run_duration = $InsHistrow.HIST_run_duration
+
+$SqlCmdInsHist = New-Object System.Data.SqlClient.SqlCommand
+
+$SqlCmdInsHist.CommandText = " 
+insert into [Inventory].[Job_History] (
+ InstanceNam
+,JobNam
+,HIST_run_date
+,HIST_run_time
+,HIST_run_duration
+)
+     values (
+ '$InstanceNam'
+,'$JobNam'
+,'$HIST_run_date'
+,'$HIST_run_time'
+,'$HIST_run_duration'
+      );
+"
+$SqlCmdInsHist.Connection = $SqlConnectionInsJobDet
+$SqlCmdInsHist.CommandTimeout = 0
+$SqlAdapterInsHist = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterInsHist.SelectCommand = $SqlCmdInsHist
+$DataSetInsHist = New-Object System.Data.DataSet
+$SqlAdapterInsHist.Fill($DataSetInsHist) | Out-Null
+}
+}
+
+
+$SqlConnectionInsJobDet.Close()
+$outdataInsY = @()
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"Completed at $ENDsysdatetime" | Out-File C:\PowerTemp\Ins_Jobs_Skipped_DBs.txt -append
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+

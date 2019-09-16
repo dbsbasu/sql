@@ -1,0 +1,153 @@
+if (Test-Path C:\PowerTemp) { " " }
+else { new-item -path C:\PowerTemp -type directory }
+
+#--for this PS manually clear the log before starting afresh. and then retain the log for all iterations until finished
+#--if (Test-Path C:\PowerTemp\Table_Columns_only_SMO.txt) { ri C:\PowerTemp\Table_Columns_only_SMO.txt }
+#--else { " " }
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+ 
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor white "Table_Columns_only_SMO: Started at $STARTsysdatetime" 
+"Table_Columns_only_SMO: Started at $STARTsysdatetime" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor darkcyan "$sysdatetime : Retrieving data from source "
+"$sysdatetime : Retrieving data from source " | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='myserver';Initial Catalog='inventory_table';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT InstanceNam, PortNum
+FROM [dbo].[instance_table]
+WHERE DBMSVer like '10%'
+;"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+$outdata1 = $DataSet1.Tables[0]
+
+#--get Table Columns and subsequently add them ======>
+write-host -foregroundcolor cyan "$sysdatetime : Traversing qualified Instances "
+"$sysdatetime : Traversing qualified Instances  " | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+$counterA = 0
+$array15 = $outdata1 | select-object InstanceNam, PortNum
+foreach ($row15 in $array15[141..159])
+{  
+ $InsX = $row15.InstanceNam
+ $PortNum = $row15.PortNum
+ $InsX_port = $InsX+','+$PortNum
+ $sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+ $counterA = $counterA + 1
+ write-host -foregroundcolor white "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+ "$sysdatetime $counterA Instance: $InsX_port ==> WIP" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+ $serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+ $counterDB = 0
+ foreach ($db in $serverX.Databases)
+ {
+  $TBCols = @("")
+  $dbNam = $db.Name
+
+  if (!$db.IsSystemObject -and $db.Name -ne "Utildb" -and $db.Status -ne "Normal" -and $db.IsAccessible -ne "True")
+  {
+   $a1 = ($db.properties | where {$_.name -eq "MirroringRole"}  | select-object value); $MirroringRole = $a1.value
+   $DBProp = $db | select-object ID, Name, IsAccessible, Status, IsDatabaseSnapshot, ReplicationOptions, MirroringRole, MirroringStatus, MirroringPartnerInstance
+   write-host -foregroundcolor DarkYellow "Status <> Normal -or- Not Accessible:   $DBProp"
+   "Status <> Normal -or- Not Accessible:   $DBProp" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+  }
+
+  if (!$db.IsSystemObject -and $db.Name -ne "Utildb" -and $db.Status -eq "Normal" -and $db.IsAccessible -eq "True")
+  {
+   $counterDB =  $counterDB + 1
+ write-host -foregroundcolor green "     $counterDB Database: $dbNam on Instance: $InsX_port"
+ "     $counterDB Database: $dbNam on Instance: $InsX_port" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+ $counterTB = 0
+   foreach($tb in $db.tables) 
+   {
+    $tbRowCount = $tb.RowCount;
+    if (!$tb.IsSystemObject -and $tbRowCount -gt 0)
+    {
+     $TBSchema2 = $tb.schema; $TBNam2 = $tb.name;
+     $counterCol = 0
+     foreach($col in $tb.columns)
+     {
+      $a2 = ($col.properties | where-object {$_.name -eq "length"} | select-object value) ; $a3 = $a2.value; 
+      add-member -InputObject $col -MemberType NoteProperty -name TBSchema -value "$TBSchema2"
+      add-member -InputObject $col -MemberType NoteProperty -name TBNam -value "$TBNam2"
+      add-member -InputObject $col -MemberType NoteProperty -name Col_Len -value "$a3"
+      $TBCols = $TBCols + $col
+      $counterCol = $counterCol + 1
+     } # col 
+     $counterTB = $counterTB + 1
+ write-host -foregroundcolor yellow "           $counterTB Table: $TBSchema2.$TBNam2  [Cols: $counterCol, Rows: $tbRowCount]"
+ "           $counterTB Table: $TBSchema2.$TBNam2  [Cols: $counterCol, Rows: $tbRowCount]" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+    } # sys tb and contains data
+   }  # tb
+   
+#--add TB Columns ======>
+$SqlConnectionDBFile = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionDBFile.ConnectionString = "Server='myserver';Initial Catalog='inventory_table';Integrated Security=True"
+$arrayFile = $TBCols | select-object TBSchema, TBNam, Id, Name, DataType, Col_Len, Nullable, inPrimaryKey, isForeignKey
+foreach ($Filerow in $arrayFile)
+{  
+$TBSchema = $Filerow.TBSchema
+$TBNam =    $Filerow.TBNam
+$Col_Id =   $Filerow.Id
+$Col_Nam =  $Filerow.Name
+$Col_DataType = $Filerow.DataType
+$Col_Length =   $Filerow.Col_Len
+$Col_Nullable = $Filerow.Nullable
+$Col_inPrimaryKey =  $Filerow.inPrimaryKey
+$Col_isForeignKey =  $Filerow.isForeignKey
+if ($InsX -gt " " -and $DBNam -gt " " -and $TBNam -gt " " -and $Col_Nam -gt " ")
+{  
+$SqlCmdDBFile = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdDBFile.CommandText = " 
+insert into [dbo].[Table_Columns] ([InstanceNam]
+      ,[DBNam]
+      ,[TBSchema]
+      ,[TBNam]
+      ,[Col_Id]
+      ,[Col_Nam]
+      ,[Col_DataType]
+      ,[Col_Length]
+      ,[Col_Nullable]
+      ,[Col_inPrimaryKey]
+      ,[Col_isForeignKey] )
+      values ('$InsX'
+      ,'$DBNam'
+      ,'$TBSchema'
+      ,'$TBNam'
+      ,'$Col_Id'
+      ,'$Col_Nam'
+      ,'$Col_DataType'
+      ,'$Col_Length'
+      ,'$Col_Nullable'
+      ,'$Col_inPrimaryKey'
+      ,'$Col_isForeignKey' );
+"  
+$SqlCmdDBFile.Connection = $SqlConnectionDBFile
+$SqlCmdDBFile.CommandTimeout = 0
+$SqlAdapterDBFile = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterDBFile.SelectCommand = $SqlCmdDBFile
+$DataSetDBFile = New-Object System.Data.DataSet
+$SqlAdapterDBFile.Fill($DataSetDBFile) | Out-Null
+}  
+}  
+$SqlConnectionDBFile.Close()
+$TBCols = @("")
+ write-host -foregroundcolor DarkMagenta "        data written for the database: $dbNam on Instance: $InsX_port"
+ "        data written for the database: $dbNam on Instance: $InsX_port" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+  } #sysObject
+ } #db
+} #instance
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor white "Table_Columns_only_SMO: Completed at $ENDsysdatetime"
+"Table_Columns_only_SMO: Completed at $ENDsysdatetime" | Out-File C:\PowerTemp\Table_Columns_only_SMO.txt -append
+

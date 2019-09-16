@@ -1,0 +1,239 @@
+if (Test-Path C:\PowerTemp) { " " }
+else { new-item -path C:\PowerTemp -type directory }
+
+if (Test-Path C:\PowerTemp\Instance_Details.html) { ri C:\PowerTemp\Instance_Details.html }
+else { " " }
+
+if (Test-Path C:\PowerTemp\Instance_Details2.html) { ri C:\PowerTemp\Instance_Details2.html }
+else { " " }
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+$domain1_1st = "y";
+$domainxxxq_1st = "y";
+$domainxxx_1st = "y";
+$style = "<style> BODY{background-color:peachpuff;} TABLE{border-width: 1px;border-style: solid;border-color: black;border-collapse: collapse;}  TH{border-width: 1px;padding: 0px;border-style: solid;border-color: black;background-color:thistle} TD{border-width: 1px;padding: 0px;border-style: solid;border-color: black;background-color:PaleGoldenrod} </style>"
+ 
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "Instance_DB_Info_only_SMO: Started at $STARTsysdatetime" 
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "$sysdatetime : Retrieving data from source "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='server';Initial Catalog='mydb';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+
+/*
+SELECT InstanceNam, PortNum
+FROM [Inventory].[table]
+WHERE 
+--DBMSVer like '10%'
+Choice = 'y';
+*/
+SELECT 'qservers' as InstanceNam, '1433' as PortNum
+
+"
+
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+$outdata1 = $DataSet1.Tables[0]
+
+#--get Instance_DB_TLog_File_ and subsequently add them ======>
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object InstanceNam, PortNum
+foreach ($row15 in $array15)
+{  
+ $mountPointOut = @("")
+ $InsX = $row15.InstanceNam
+ $PortNum = $row15.PortNum
+ $InsX_port = $InsX+','+$PortNum
+ $sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+ write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+ $counterA = $counterA + 1
+ $serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+ $InsInfo = $serverX.Information | select NetName, VersionString, Processors, PhysicalMemory, Edition, ProductLevel, ComputerNamePhysicalNetBIOS, IsClustered
+ if ($serverX.Settings.defaultlog.length > 0) {$DriveLetter = $serverX.Settings.defaultlog.substring(0,2)}
+ elseif($serverX.Settings.DefaultFile.length >0 ) {$DriveLetter = $serverX.Settings.DefaultFile.substring(0,2)} 
+ elseif($serverX.Information.MasterDBLogPath.length >0 ) {$DriveLetter = $serverX.Information.MasterDBLogPath.substring(0,2)} 
+ else {$DriveLetter = $serverX.Information.MasterDBPath.substring(0,2)}
+ if (-not $serverX.Information.Isclustered) {$DriveLetter =""}
+ $MachineNam = $serverX.Information.ComputerNamePhysicalNetBIOS 
+ $ServiceAccount = $serverX.ServiceAccount
+ $Domain = ($ServiceAccount).Split('\')[0]
+ if ($Domain -eq "domain1")
+ {
+  if ($domain1_1st -eq "y")
+  {  $creddomain1 = Get-Credential "domain1\user1" }
+  $domain1_1st = "n";
+  $mountPointsData = Get-WmiObject Win32_Volume -ComputerName $MachineNam -Credential $creddomain1 | Select-Object SystemName, Label ,Name, DriveLetter, DriveType, Capacity, Freespace|sort-object -property name
+  $Computerdata = Get-WmiObject Win32_ComputerSystem -ComputerName $MachineNam -Credential $creddomain1 | Select Name, Domain, TotalPhysicalMemory, NumberOfLogicalProcessors, NumberOfProcessors, Manufacturer, Model, SystemType
+  $OperData = Get-WmiObject Win32_OperatingSystem -ComputerName $MachineNam -Credential $creddomain1 | Select CSName, Caption, CSDVersion, BuildNumber, SerialNumber, LastBootUpTime
+  $Process = Get-WmiObject Win32_Process -ComputerName $MachineNam -Credential $creddomain1 | select ProcessName, Path, Caption, Description|sort-object -property ProcessName
+  #$product = Get-WmiObject Win32_Product -ComputerName $MachineNam -Credential $creddomain1 | select Name, Version, Caption, Description, InstallLocation, Vendor|sort-object -property Name
+ }
+   
+ if ($Domain -eq "domainxxx")
+ {
+   if ($domainxxx_1st -eq "y")
+  {  $creddomainxxx = Get-Credential "domainxxx\user1" }
+  $domainxxx_1st = "n";
+  $mountPointsData = Get-WmiObject Win32_Volume -ComputerName $MachineNam -Credential $creddomainxxx | Select-Object SystemName, Label ,Name, DriveLetter, DriveType, Capacity, Freespace|sort-object -property name
+  $Computerdata = Get-WmiObject Win32_ComputerSystem -ComputerName $MachineNam -Credential $creddomainxxx  | Select Name, Domain, TotalPhysicalMemory, NumberOfLogicalProcessors, NumberOfProcessors, Manufacturer, Model, SystemType
+  $OperData = Get-WmiObject Win32_OperatingSystem -ComputerName $MachineNam -Credential $creddomainxxx | Select CSName, Caption, CSDVersion, BuildNumber, SerialNumber, LastBootUpTime
+  $Process = Get-WmiObject Win32_Process -ComputerName $MachineNam -Credential $creddomainxxx | select ProcessName, Path, Caption, Description|sort-object -property ProcessName
+  $product = Get-WmiObject Win32_Product -ComputerName $MachineNam -Credential $creddomainxxx | select Name, Version, Caption, Description, InstallLocation, Vendor|sort-object -property Name
+ }
+
+if ($Domain -eq "domainxxxq")
+ {
+   if ($domainxxxq_1st -eq "y")
+  {  $creddomainxxxq = Get-Credential "domainxxxq\user1" }
+  $domainxxxq_1st = "n";
+  $mountPointsData = Get-WmiObject Win32_Volume -ComputerName $MachineNam -Credential $creddomainxxxq | Select-Object SystemName, Label ,Name, DriveLetter, DriveType, Capacity, Freespace|sort-object -property name
+  $Computerdata = Get-WmiObject Win32_ComputerSystem -ComputerName $MachineNam -Credential $creddomainxxxq  | Select Name, Domain, TotalPhysicalMemory, NumberOfLogicalProcessors, NumberOfProcessors, Manufacturer, Model, SystemType
+  $OperData = Get-WmiObject Win32_OperatingSystem -ComputerName $MachineNam -Credential $creddomainxxxq | Select CSName, Caption, CSDVersion, BuildNumber, SerialNumber, LastBootUpTime
+  $Process = Get-WmiObject Win32_Process -ComputerName $MachineNam -Credential $creddomainxxxq | select ProcessName, Path, Caption, Description|sort-object -property ProcessName
+  $product = Get-WmiObject Win32_Product -ComputerName $MachineNam -Credential $creddomainxxxq | select Name, Version, Caption, Description, InstallLocation, Vendor|sort-object -property Name
+ }
+
+ [float]$PhysicalMemory_MB1 = [math]::round($Computerdata.TotalPhysicalMemory / 1048576, 0) 
+ $PhysicalMemory_MB = "{0,11:N0}" -f $PhysicalMemory_MB1
+ add-member -InputObject $Computerdata -MemberType NoteProperty -name PhysicalMemory_MB -value "$PhysicalMemory_MB" -force
+ "<p>Instance: <b>$InsX</b> PortNumber: <b>$PortNum</b> Machine: <b>$MachineNam</b> Domain: <b>$Domain</b> <u>Clock Time</u>: <i>$STARTsysdatetime</i></p>" | Out-File C:\PowerTemp\Instance_Details.html -append
+ "<i>SQL Instance</i>" | Out-File C:\PowerTemp\Instance_Details.html -append
+ $InsInfo |ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+ "<i>Computer System</i>" | Out-File C:\PowerTemp\Instance_Details.html -append
+ $Computerdata | Select Name, Domain, NumberOfLogicalProcessors, NumberOfProcessors, PhysicalMemory_MB, Manufacturer, Model, SystemType |sort-object -property name | ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+ "<i>Operating System</i>" | Out-File C:\PowerTemp\Instance_Details.html -append
+ $OperData | ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+ "<p>Instance: <b>$InsX</b> PortNumber: <b>$PortNum</b> Machine: <b>$MachineNam</b> Domain: <b>$Domain</b> <u>Clock Time</u>: <i>$STARTsysdatetime</i></p>" | Out-File C:\PowerTemp\Instance_Details2.html -append
+ "<i>Process</i>" | Out-File C:\PowerTemp\Instance_Details2.html -append
+ $Process |ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details2.html -append
+ "<i>Product</i>" | Out-File C:\PowerTemp\Instance_Details2.html -append
+ $Product |ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details2.html -append
+
+ foreach ($mountPointRow in $mountPointsData) 
+ {
+  if ((-not $mountPointRow.name.StartsWith("\\")) -and $mountPointRow.name.StartsWith($DriveLetter) -and ($mountPointRow.Drivetype -ne 5)) 
+  {
+   if ($mountPointRow.Capacity -gt "0")
+   {
+    [float]$tempfloat = ([long]$mountPointRow.Freespace) / ([long]$mountPointRow.Capacity)
+    $PercentFree1 = [math]::round(($tempfloat * 100),2)
+    $PercentFree = "{0,11:N2}" -f $PercentFree1
+   }
+   else
+   {$PercentFree = "na"}
+   [float]$TotalSpace_GB1 = [math]::round([long]$mountPointRow.Capacity / [long]1024000000, 3) 
+   $TotalSpace_GB = "{0,11:N3}" -f $TotalSpace_GB1
+   [float]$FreeSpace_GB1 = [math]::round([long]$mountPointRow.Freespace / [long]1024000000, 3) 
+   $FreeSpace_GB = "{0,11:N3}" -f $FreeSpace_GB1
+   add-member -InputObject $mountPointRow -MemberType NoteProperty -name TotalSpace_GB -value "$TotalSpace_GB" -force
+   add-member -InputObject $mountPointRow -MemberType NoteProperty -name FreeSpace_GB -value "$FreeSpace_GB" -force
+   add-member -InputObject $mountPointRow -MemberType NoteProperty -name PercentFree -value "$PercentFree" -force
+   $mountPointOut = $mountPointOut + $mountPointRow
+  }
+ }
+ $Ins_DL = @()
+ $Ins_DL = $mountPointOut | select-object SystemName, Name, TotalSpace_GB, FreeSpace_GB, PercentFree, Label  
+ "<i>Mount Point</i>" | Out-File C:\PowerTemp\Instance_Details.html -append
+ $Ins_DL | ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+ 
+ $DBsOut = @("")
+ foreach ($db in $serverX.Databases)
+ {
+  $dbNam = $db.Name
+  if ($db.IsSystemObject -match "False" -and $db.Name -ne "dbaUtils")
+  {
+   $a1 = ($db.properties | where {$_.name -eq "MirroringRole"}  | select-object value); $MirroringRole = $a1.value
+   add-member -InputObject $db -MemberType NoteProperty -name MirroringRole -value "$MirroringRole" -force
+   $DBs = $db | select-object ID, Name, IsSystemObject, IsAccessible, Status, RecoveryModel, IsDatabaseSnapshot, ReplicationOptions, MirroringRole, MirroringStatus, MirroringPartnerInstance |sort-object -property Name
+   "Instance: <b>$InsX</b>  DatabaseProperties: <b>$dbNam</b>" | Out-File C:\PowerTemp\Instance_Details.html -append
+   $DBs |ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+  }
+  $DBFilesOut = @("")
+  if (($db.IsSystemObject -match "False" -or $db.Name -eq "TempDB") -and $db.Name -ne "dbaUtils")
+  {
+   if ($db.Status -eq "Normal" -and $db.IsAccessible -eq "True")
+   {
+    foreach ($fg in $db.filegroups) 
+    {
+     $FGNam = $fg.Name
+     foreach ($file in $fg.files) 
+     {
+      [float]$FileSize_GB1 = [math]::round([long]$file.Size/[long]1024000,3); 
+      $FileSize_GB = "{0,11:N3}" -f $FileSize_GB1
+      [float]$SpaceUsed_GB1 = [math]::round([long]$file.UsedSpace/[long]1024000,3)
+      $SpaceUsed_GB = "{0,11:N3}" -f $SpaceUsed_GB1
+      $SpaceFree = ($file.Size - $file.UsedSpace)
+      [float]$SpaceFree_GB1 = [math]::round([long]$SpaceFree/[long]1024000,3); 
+      $SpaceFree_GB = "{0,11:N3}" -f $SpaceFree_GB1
+      if ($file.Size -gt "0")
+      {
+       [float]$tempfloat = ([long]$SpaceFree / [long]$file.Size)
+       $PercentFreeF1 = [math]::round(($tempfloat * 100),2)
+       $PercentFree = "{0,11:N2}" -f $PercentFreeF1
+      }
+      else
+      {$PercentFree = "na"}
+      add-member -InputObject $file -MemberType NoteProperty -name FGNam -value "$FGNam" -force
+      add-member -InputObject $file -MemberType NoteProperty -name FileSize_GB -value "$FileSize_GB" -force
+      ##add-member -InputObject $file -MemberType NoteProperty -name SpaceUsed_GB -value "$SpaceUsed_GB" -force
+      add-member -InputObject $file -MemberType NoteProperty -name SpaceFree_GB -value "$SpaceFree_GB" -force
+      add-member -InputObject $file -MemberType NoteProperty -name PercentFree -value "$PercentFree" -force
+      $DBFilesOut = $DBFilesOut + $file
+     } #file
+    } #fg
+    foreach ($log in $db.logfiles) 
+    {
+     [float]$LogSize_GB1 = [math]::round([long]$log.Size/[long]1024000,3)
+     $LogSize_GB = "{0,11:N3}" -f $LogSize_GB1
+     add-member -InputObject $log -MemberType NoteProperty -name FGNam -value "TranLog" -force
+     add-member -InputObject $log -MemberType NoteProperty -name FileSize_GB -value "$LogSize_GB" -force
+     ##add-member -InputObject $log -MemberType NoteProperty -name SpaceUsed_GB -value "na" -force
+     add-member -InputObject $log -MemberType NoteProperty -name SpaceFree_GB -value "na" -force
+     add-member -InputObject $log -MemberType NoteProperty -name PercentFree -value "na"  -force
+     $DBFilesOut = $DBFilesOut + $log
+    } #log
+    $DB_FL = @()
+    $DB_FL = $DBFilesOut| select-object FGNam, Name, FileName, FileSize_GB, SpaceFree_GB, PercentFree
+    "Instance: <b>$InsX</b>  <i>DatabaseFiles: </i> $dbNam" |  Out-File C:\PowerTemp\Instance_Details.html -append
+    $DB_FL | ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+   } #status
+  } #systemOb
+ } #db
+  
+ foreach ($jobs in $serverX.jobserver) 
+ {
+  foreach($job in $jobs.jobs) 
+  {
+   $JobNam = $job.Name
+   $jobsOut = @("")
+   if ($job.IsEnabled -match "true")
+   {
+    foreach($jobSchedule in $job.JobSchedules) 
+    {
+     $jobsOut = $jobsOut + $jobSchedule
+    } #schedule
+    $jobsOut_Sel = @()
+    $jobsOut_Sel = $jobsOut | select-object ID, IsEnabled, FrequencyTypes, FrequencyInterval, FrequencySubDayTypes, FrequencySubDayInterval, FrequencyRelativeIntervals, ActiveStartTimeOfDay, ActiveEndTimeOfDay, Name
+    "Instance: <b>$InsX</b>  Job: <b>$JobNam</b>" | Out-File C:\PowerTemp\Instance_Details.html -append
+    $jobsOut_Sel | ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\Instance_Details.html -append
+   } #jobIsEnabled
+  } #job
+ } #jobserver
+
+} #instance
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+
+Invoke-Expression C:\PowerTemp\Instance_Details2.html
+Invoke-Expression C:\PowerTemp\Instance_Details.html

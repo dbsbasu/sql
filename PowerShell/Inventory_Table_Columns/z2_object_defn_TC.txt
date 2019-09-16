@@ -1,0 +1,90 @@
+
+----------------data query for verification---------------
+select sc.name as schema_nam, ob.name as ob_nam, ob.type_desc ob_type_desc, ix.type_desc as ix_type_desc, pt.partition_number, pt.rows
+from sys.objects ob 
+INNER JOIN sys.schemas as sc ON sc.schema_id = ob.schema_id
+INNER JOIN sys.partitions pt ON pt.object_id = ob.object_id
+INNER JOIN sys.indexes ix ON ix.index_id = pt.index_id AND ix.object_id = pt.object_id	
+where 
+ (ix.index_id <= 1) and
+  sc.name <> 'sys'
+  and ob.name = 'Table_Columns'
+order by sc.name, ob.name, pt.partition_number;
+
+SELECT Dense_RANK() over (order by InstanceNam asc) as seq_Inst, InstanceNam, RANK() over (partition by InstanceNam order by DBNam asc) as seq_DB, DBNam, COUNT(distinct (TBSchema+TBNam)) as #_of_tables_with_data, COUNT(*) #_of_column_entries FROM [dbo].[Table_Columns] group by InstanceNam, DBNam order by InstanceNam asc, DBNam asc;
+
+
+-------------------------------
+IF  EXISTS (SELECT * FROM sys.objects WHERE object_id = OBJECT_ID(N'[dbo].[Table_Columns]') AND type in (N'U'))
+DROP TABLE [dbo].[Table_Columns]
+GO
+
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+SET ANSI_PADDING ON
+GO
+
+CREATE TABLE [dbo].[Table_Columns](
+	[InstanceNam] [varchar](80) NOT NULL,
+	[DBNam] [varchar](320) NOT NULL,
+	[TBSchema] [varchar](320) NOT NULL,
+	[TBNam] [varchar](320) NOT NULL,
+	[Col_Id] [varchar](10) NOT NULL,
+	[Col_Nam] [varchar](320) NOT NULL,
+	[Col_DataType] [varchar](40) NOT NULL,
+	[Col_Length] [varchar](10) NOT NULL,
+	[Col_Nullable] [varchar](10) NOT NULL,
+	[Col_inPrimaryKey] [varchar](10) NOT NULL,
+	[Col_isForeignKey] [varchar](10) NOT NULL
+) ON [PRIMARY]
+
+GO
+
+SET ANSI_PADDING OFF
+GO
+
+
+CREATE UNIQUE CLUSTERED INDEX [Table_Columns_CLS] ON [dbo].[Table_Columns] 
+(
+	[InstanceNam] ASC,
+	[DBNam] ASC,
+	[TBSchema] ASC,
+	[TBNam] ASC,
+	[Col_Nam] ASC
+)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON, FILLFACTOR = 90) ON [PRIMARY]
+GO
+
+
+CREATE NONCLUSTERED INDEX [Table_Columns_NC1] ON [dbo].[Table_Columns] 
+(
+	[Col_Nam] ASC,
+	[TBSchema] ASC,
+	[TBNam] ASC,
+	[DBNam] ASC,
+	[InstanceNam] ASC
+)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON, FILLFACTOR = 90) ON [PRIMARY]
+GO
+
+
+CREATE NONCLUSTERED INDEX [Table_Columns_NC2] ON [dbo].[Table_Columns] 
+(
+	[TBSchema] ASC,
+	[TBNam] ASC,
+	[DBNam] ASC,
+	[InstanceNam] ASC
+)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON, FILLFACTOR = 90) ON [PRIMARY]
+GO
+
+
+CREATE NONCLUSTERED INDEX [Table_Columns_NC3] ON [dbo].[Table_Columns] 
+(
+	[DBNam] ASC,
+	[TBSchema] ASC,
+	[TBNam] ASC
+)WITH (PAD_INDEX  = OFF, STATISTICS_NORECOMPUTE  = OFF, SORT_IN_TEMPDB = OFF, IGNORE_DUP_KEY = OFF, DROP_EXISTING = OFF, ONLINE = OFF, ALLOW_ROW_LOCKS  = ON, ALLOW_PAGE_LOCKS  = ON, FILLFACTOR = 90) ON [PRIMARY]
+GO
+

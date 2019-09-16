@@ -1,0 +1,73 @@
+-- complete running all powershell scripts
+--source dbaweb prod to target tlog inventory in d1c
+----select * from [dbo].[LastBackup] bkp WITH (NOLOCK) where backupFinishDate > '2012-07-01 01:00:00.000'
+--rename dbo.query to dbo.lastBackup
+-- run the query below on server.tlogs
+
+--- other notes
+-- (db bkup location): format date on spread sheet
+-- (db bkup location): L and N are exceptions. not ok if they have data or tlog
+-- (sql agent): sql 2008 only. take out 2005, as exceptions
+
+
+use [tlogs]
+go
+
+declare @Find char(7);set @Find = '\backup';
+declare @fin2 char(1); set @fin2 = '\';
+declare @fin3 char(11); set @fin3 = '_LSpeed.bak';
+
+insert into dbo.bkups
+SELECT t1.InstanceNam , t1.DBMSVersion,  t1.Domain, t1.Instance_Pri_Env
+,t1.DBNam, coalesce(ibt.BackupType,'n/a') as BackupType,
+CASE WHEN @fin2 IS NULL THEN NULL ELSE 
+COALESCE(substring(t1.physicalDeviceName, 1, NullIf(len(t1.physicalDeviceName)-CHARINDEX(reverse(@fin2), REVERSE(t1.physicalDeviceName)), 0)+1), t1.physicalDeviceName) END as Location
+, case 
+	when (t1.physicalDeviceName like '\\SQLBKUP-NonProd%')
+	then 'NAS Non-Prod'
+	when (t1.physicalDeviceName like '\\SQLBKUP-Prod%')
+	then 'NAS Prod'
+	when (t1.physicalDeviceName like '\\SQLBKUP-%')
+	then 'NAS'
+	when (mp.MountPointNam is not null)
+	then 'Mount Point' 	
+	when (mp.MountPointNam is null)
+	then 'Local Drive'
+  end as Is_NAS_MountPoint_Folder
+,coalesce(mp.MountPointNam,'n/a') as if_MountPoint
+, mp.TotalSpace_GB, mp.FreeSpace_GB, mp.PercentFree
+,CASE WHEN @fin2 IS NULL THEN NULL ELSE 
+COALESCE(substring(t1.physicalDeviceName, ((len(t1.physicalDeviceName))-CHARINDEX((@fin2), reverse(t1.physicalDeviceName))+2), (len(t1.physicalDeviceName))), t1.physicalDeviceName) END as Backup_File
+--,case when CHARINDEX((@fin3), (t1.physicalDeviceName)) >= 1 then 'LiteSpeed' else '' end as Is_Litespeed
+, t1.backupFinishDate as LastBackup_DateTime
+FROM (  
+SELECT top 99999 bkp.InstanceNam, coalesce(dmn.Domain,'need_upd') as Domain, ins.Instance_Pri_Env, (case when(ins.DBMSVer like '10%') then 'SQL 2008' else 'SQL 2005' end) as DBMSVersion
+      ,bkp.DBNam
+      ,bkp.physicalDeviceName
+      ,bkp.backupFinishDate
+,REPLACE(
+COALESCE(substring(bkp.physicalDeviceName, 1, NullIf(CHARINDEX(@Fin2,bkp.physicalDeviceName,    NullIf(CHARINDEX(@Find, bkp.physicalDeviceName),0)    +1), 0)), bkp.physicalDeviceName), '$', ':')as DriveName2
+FROM [Inventory].[Allservers] ins
+INNER JOIN Inventory.Recovery_Model_Data rmd
+ON rmd.InstanceNam = ins.InstanceNam 
+AND (ins.DBMSVer like '10%' OR ins.DBMSVer like '9%')
+ --AND ins.Instance_Pri_Env = 'PD' 
+LEFT OUTER JOIN (select distinct mp. InstanceNam, mp.Domain from Inventory.Instance_MountPoints mp) as dmn on dmn.InstanceNam = ins.InstanceNam
+LEFT OUTER JOIN [dbo].[LastBackup] bkp WITH (NOLOCK)
+ON bkp.instanceNam = ins.InstanceNam AND rmd.DBNam = bkp.DBNam
+WHERE bkp.lastBackupID = 
+               (SELECT MAX(bkp2.lastBackupID)
+                  FROM [dbo].[LastBackup] bkp2 WITH (NOLOCK)
+                 WHERE bkp2.instanceNam = bkp.instanceNam AND bkp2.dbNam = bkp.dbNam
+                   AND bkp2.backupType ='d'
+--                   AND bkp.physicalDeviceName NOT LIKE '\\SQLBKUP-%'
+                   AND bkp2.backupFinishDate > '2012-07-01 01:00:00.000')
+  AND bkp.backupType ='d'
+--  AND bkp.physicalDeviceName NOT LIKE '\\SQLBKUP-%'
+) AS t1
+LEFT OUTER JOIN [Inventory].[Instance_MountPoints] mp WITH (NOLOCK)
+ON t1.instanceNam = mp.InstanceNam AND t1.DriveName2 = mp.MountPointNam
+LEFT OUTER JOIN Inventory.Backup_Type ibt
+ON ibt.InstanceNam = t1.InstanceNam and ibt.DBNam = t1.DBNam
+ORDER BY t1.Instance_Pri_Env desc, t1.InstanceNam, t1.DBNam
+;

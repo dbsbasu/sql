@@ -1,0 +1,81 @@
+if (Test-Path C:\PowerTemp)
+{ " " }
+else
+{ new-item -path C:\PowerTemp -type directory }
+
+if (Test-Path C:\PowerTemp\alias_to_instance_name.html) { ri C:\PowerTemp\alias_to_instance_name.html }
+else { " " }
+
+$style = "<style> BODY{background-color:peachpuff;} TABLE{border-width: 1px;border-style: solid;border-color: black;border-collapse: collapse;}  TH{border-width: 1px;padding: 0px;border-style: solid;border-color: black;background-color:thistle} TD{border-width: 1px;padding: 0px;border-style: solid;border-color: black;background-color:PaleGoldenrod} </style>"
+
+$x_confirm = @("")
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
+
+$objForm = New-Object System.Windows.Forms.Form 
+$objForm.Text = "Obtain User Permissions"
+$objForm.Size = New-Object System.Drawing.Size(300,200) 
+$objForm.StartPosition = "CenterScreen"
+
+$objForm.KeyPreview = $True
+$objForm.Add_KeyDown({if ($_.KeyCode -eq "Enter") 
+    {$x_confirm="1";$objForm.Close()}})
+$objForm.Add_KeyDown({if ($_.KeyCode -eq "Escape") 
+    {$objForm.Close()}})
+
+$OKButton = New-Object System.Windows.Forms.Button
+$OKButton.Location = New-Object System.Drawing.Size(75,120)
+$OKButton.Size = New-Object System.Drawing.Size(75,23)
+$OKButton.Text = "OK"
+$OKButton.Add_Click({$x_confirm="1";$objForm.Close()})
+$objForm.Controls.Add($OKButton)
+
+$CancelButton = New-Object System.Windows.Forms.Button
+$CancelButton.Location = New-Object System.Drawing.Size(150,120)
+$CancelButton.Size = New-Object System.Drawing.Size(75,23)
+$CancelButton.Text = "Cancel"
+$CancelButton.Add_Click({$x_confirm = "0";$objForm.Close()})
+$objForm.Controls.Add($CancelButton)
+
+$objLabel1 = New-Object System.Windows.Forms.Label
+$objLabel1.Location = New-Object System.Drawing.Size(10,40) 
+$objLabel1.Size = New-Object System.Drawing.Size(180,20) 
+$objLabel1.Text = "Input File: C:\alias_in_file.txt"
+$objForm.Controls.Add($objLabel1) 
+
+$objForm.Topmost = $True
+
+$objForm.Add_Shown({$objForm.Activate()})
+[void] $objForm.ShowDialog()
+
+if ($x_confirm -ne "1") { $msg = "exiting...";
+$msg;
+exit
+}
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo") | Out-Null
+$aliasn_in = get-content C:\alias_in_file.txt
+ForEach($alias_Name in $aliasn_in) 
+{
+$server = new-object “Microsoft.SqlServer.Management.Smo.Server” $alias_Name
+$alias_name
+$SqlConnectionM = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionM.ConnectionString = "Server='$alias_Name';Initial Catalog=master;Integrated Security=True"
+$SqlCmdM = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmdM.CommandText = " 
+select '$server' as 'alias_name', @@servername as 'instance_name';
+"
+$SqlCmdM.Connection = $SqlConnectionM
+$SqlCmdM.CommandTimeout = 0
+$SqlAdapterM = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapterM.SelectCommand = $SqlCmdM
+$DataSetM = New-Object System.Data.DataSet
+$SqlAdapterM.Fill($DataSetM) | Out-Null
+$SqlConnectionM.Close()
+$outdata = $outdata + $DataSetM.Tables[0]
+
+}
+
+$outdata | select * -ExcludeProperty RowError,RowState,Table,ItemArray,HasErrors | ConvertTo-HTML -head $style |  Out-File C:\PowerTemp\alias_to_instance_name.html -append
+Invoke-Expression C:\PowerTemp\alias_to_instance_name.html
+

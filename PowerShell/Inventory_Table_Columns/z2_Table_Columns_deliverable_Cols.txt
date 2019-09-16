@@ -1,0 +1,16 @@
+-- scmssd1c.TLog_Inventory
+SELECT [InstanceNam]
+      ,[DBNam]
+      ,[TBSchema]
+      ,[TBNam]
+      ,[Col_Id]
+      ,[Col_Nam]
+      ,[Col_DataType]
+      ,[Col_Length]
+      ,[Col_inPrimaryKey]
+      ,[Col_isForeignKey]
+      ,[Col_Nullable]      
+  FROM [dbo].[Table_Columns]
+where 
+   Col_Nam like 'ssn%'
+or Col_Nam like 'ss_n%'

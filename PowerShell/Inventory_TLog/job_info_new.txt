@@ -1,0 +1,170 @@
+$ErrorActionPreference = "Stop" 
+try {
+
+$jobsOut = @()
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+ 
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "z1_Instance_DB_Job_only_SMO: Started at $STARTsysdatetime" 
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "$sysdatetime : Retrieving data as requested "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='myserver,1433';Initial Catalog='master';Integrated Security=True"
+#$SqlConnectionGetA.ConnectionString = "Server='utilserver';Initial Catalog='master';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+SELECT ConnectionString FROM Monitor.dbo.serverlist with (nolock);-- WHERE CanConnect = 1 and DBAOwner like '%me%' and Environment = 'dev' ;
+;
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+$SqlConnectionGetA.Close()
+$outdata1 = $DataSet1.Tables[0]
+
+#--server SMO
+write-host -foregroundcolor green "$sysdatetime : Traversing qualified Instances "
+$counterA = 0
+$array15 = $outdata1 | select-object ConnectionString
+$totCnt = $array15.count
+write-host -foregroundcolor green "TOTAL Qualified Instances: $totCnt "
+foreach ($row15 in $array15[0..1000])
+{  
+ $InsX_port = $row15.ConnectionString
+ $sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+ $counterA = $counterA + 1
+ $serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+
+ write-host -foregroundcolor green "$sysdatetime $counterA Instance: $InsX_port ==> WIP"
+
+#--Jobs
+ foreach ($jobs in $serverX.jobserver) 
+ {
+  foreach($job in $jobs.jobs) 
+  {
+   $JobNam = $job.Name
+   $JobEnable = $job.IsEnabled
+
+   switch ($JobEnable) {
+                 "True"{$IsJobEnabled = "Enabled"}
+                "False"{$IsJobEnabled = "0"}
+                Default{$IsJobEnabled = $JobEnable}
+   }
+
+   foreach($jobSchedule in $job.JobSchedules) 
+   {
+
+    $ScheduleEnable = $jobSchedule.IsEnabled
+
+#if ($JobNam -eq "System - User Database Info") {$jobschedule} #display specific data of interest mainly for debugging purpose
+
+    switch ($ScheduleEnable) {
+                 "True"{$IsScheduleEnabled = "Enabled"}
+                "False"{$IsScheduleEnabled = "0"}
+                Default{$IsScheduleEnabled = $ScheduleEnable}
+    }
+
+    $ScheduleStartDate = $jobSchedule.ActiveStartDate.ToShortDateString() 
+    $ScheduleEndDate   = $jobSchedule.ActiveEndDate.ToShortDateString() 
+
+    $jobSchedule | add-member -MemberType NoteProperty -Name SQLInstanceNam -Value $InsX_port | out-null
+    $jobSchedule | add-member -MemberType NoteProperty -Name JobNam -Value $JobNam | out-null
+    $jobSchedule | add-member -MemberType NoteProperty -Name IsJobEnabled -Value $IsJobEnabled  | out-null
+    $jobSchedule | add-member -MemberType NoteProperty -Name IsScheduleEnabled -Value "$IsScheduleEnabled"  | out-null
+    $jobSchedule | add-member -MemberType NoteProperty -Name ScheduleDesc -Value ""  | out-null
+    $jobSchedule | add-member -MemberType NoteProperty -Name  ScheduleStartDate -Value " $ScheduleStartDate"  | out-null
+    $jobSchedule | add-member -MemberType NoteProperty -Name  ScheduleEndDate -Value "$ScheduleEndDate" -passthru  | out-null
+
+    if ($jobSchedule.FrequencyTypes -eq "OneTime")
+       {
+          $jobSchedule.ScheduleDesc = "OneTime " 
+       }
+
+    if ($jobSchedule.FrequencyTypes -eq "Daily")
+       {
+          $jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyInterval + " day(s)"
+       }
+
+    if ($jobSchedule.FrequencyTypes -eq "Monthly")
+       {
+          $jobSchedule.ScheduleDesc = "On the day " + $jobSchedule.FrequencyInterval + " of the month every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s)"
+       }
+
+    if ($jobSchedule.FrequencyTypes -eq "AutoStart")
+       {
+          $jobSchedule.ScheduleDesc = "AutoStart" 
+       }
+
+    if ($jobSchedule.FrequencyTypes -eq "Weekly")
+       {
+        switch ($jobSchedule.FrequencyInterval)
+               {
+                    1{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Sunday "}
+                    2{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Monday "}
+                    4{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Tuesday "}
+                    8{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Wednesday "}
+                   16{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Thursday "}
+                   32{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Friday "}
+                   64{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Saturday "}
+                   62{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Weekday "}
+                   65{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on Weekend "}
+                  127{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " week(s) on everyday "}
+                  Default{$jobSchedule.ScheduleDesc = $jobSchedule.FrequencyTypes, $jobSchedule.FrequencyInterval,  $jobSchedule.FrequencyRecurrenceFactor}
+               }
+       }
+
+    if ($jobSchedule.FrequencyTypes -eq "MonthlyRelative")
+       {
+        switch ($jobSchedule.FrequencyInterval)
+               {
+                    1{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Sunday"}
+                    2{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Monday"}
+                    3{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Tuesday"}
+                    4{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Wednesday"}
+                    5{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Thursday"}
+                    6{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Friday"}
+                    7{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" Saturday"}
+                    8{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" everyday"}
+                    9{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" weekday"}
+                   10{$jobSchedule.ScheduleDesc = "Every " + $jobSchedule.FrequencyRecurrenceFactor + " month(s) on "+ $jobSchedule.FrequencyRelativeIntervals +" weekend day"}
+                  Default{$jobSchedule.ScheduleDesc = $jobSchedule.FrequencyTypes, $jobSchedule.FrequencyInterval}
+               }
+       }
+
+
+
+    if ($jobSchedule.FrequencySubDayInterval -ne "0")
+       { $jobSchedule.ScheduleDesc = $jobSchedule.ScheduleDesc + " Every " + $jobSchedule.FrequencySubDayInterval + " " + $jobSchedule.FrequencySubDayTypes }
+
+
+    $jobsOut = $jobsOut + $jobSchedule
+
+   } #schedule
+
+  } #job
+
+ } #jobserver
+
+} #instance
+
+
+$jobsOut | select-object SQLInstanceNam, JobNam, IsJobEnabled, ID, IsScheduleEnabled, ActiveStartTimeOfDay, ActiveEndTimeOfDay, ScheduleDesc, ScheduleStartDate, ScheduleEndDate, FrequencyTypes, FrequencyRecurrenceFactor, FrequencyInterval, FrequencySubDayTypes, FrequencySubDayInterval, FrequencyRelativeIntervals | sort-object SQLInstanceNam, JobNam, JobEnabled, ID | out-gridview
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+
+}
+
+Catch { $quit = 'quitting due to error: ' 
+$ErrorMessage = $_.Exception.Message 
+$FullName = $_.Exception.GetType().FullName 
+$FailedItem = $_.Exception.ItemName 
+$quit + $FailedItem + $ErrorMessage + $FullName 
+Break }
+finally { $ErrorActionPreference = "Stop"}

@@ -1,0 +1,85 @@
+if (Test-Path C:\PowerTemp) { " " }
+else { new-item -path C:\PowerTemp -type directory }
+
+if (Test-Path C:\PowerTemp\Qualified_Instances_Skipped_DBs.txt) { ri C:\PowerTemp\Qualified_Instances_Skipped_DBs.txt }
+else { " " }
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+
+$STARTsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"a1_Qualified_Instances: Started at $STARTsysdatetime" | Out-File C:\PowerTemp\Qualified_Instances_Skipped_DBs.txt -append
+write-host -foregroundcolor green "a1_Qualified_Instances: Started at $STARTsysdatetime" 
+
+
+#--get Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Retrieving data from source " | Out-File C:\PowerTemp\Qualified_Instances_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Retrieving data from source "
+$SqlConnectionGetA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionGetA.ConnectionString = "Server='myserver';Initial Catalog='sourceDB1';Integrated Security=True"
+$SqlCmd1 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd1.CommandText = " 
+select distinct ins_A.InstanceNam, cast (ins_A.PortNum as varchar(40)) as Port_num_char, ins_A.DBMSVer as DBMSVer, ins_A.prienvcd as Instance_Pri_Env
+from dbo.Instance ins_A
+inner join [dbo].[DB] db1 with (nolock)
+on  ins_A.InstanceNam = db1.InstanceNam
+and ins_A.DBMSCD = 'SQL'
+and ins_A.RetireDt is null
+and ins_A.ServerTracker = 1
+--and ((ins_A.prienvcd = 'PD' and ins_A.ServerTracker = 1) or (ins_A.prienvcd <> 'PD') )
+and not exists 
+(Select ins_fail_A.TargetInstanceNam
+from dbo.InstanceFailover ins_fail_A with (nolock)
+where 
+ins_fail_A.TargetInstanceNam = ins_A.InstanceNam and
+ins_fail_A.FailoverTypeId = 1)
+and db1.[RetireDt] is null
+--and db1.[EnvCd] = 'PD'
+and db1.DBNam not in ('master','model','msdb', 'ResourceDb','dbaUtils', 'distribution')
+order by ins_A.InstanceNam asc, cast (ins_A.PortNum as varchar(40));
+"
+$SqlCmd1.Connection = $SqlConnectionGetA
+$SqlCmd1.CommandTimeout = 0
+$SqlAdapter1 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter1.SelectCommand = $SqlCmd1
+$DataSet1 = New-Object System.Data.DataSet
+$SqlAdapter1.Fill($DataSet1) | Out-Null
+
+$SqlConnectionGetA.Close()
+
+$outdata1 = $DataSet1.Tables[0]
+
+#--add Qualified Instance Names and App-DB info   ======>
+$sysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"$sysdatetime : Creating Repository of source data " | Out-File C:\PowerTemp\Qualified_Instances_Skipped_DBs.txt -append
+write-host -foregroundcolor green "$sysdatetime : Creating Repository of source data "
+$SqlConnectionAddA = New-Object System.Data.SqlClient.SqlConnection
+$SqlConnectionAddA.ConnectionString = "Server='source';Initial Catalog='mydb';Integrated Security=True"
+$array13 = $outdata1 | select-object InstanceNam, Port_num_char, DBMSVer, Instance_Pri_Env
+foreach ($row13 in $array13)
+{
+$InstanceNam = $row13.InstanceNam
+$PortNum = $row13.Port_num_char
+$DBMSVer = $row13.DBMSVer
+$Instance_Pri_Env = $row13.Instance_Pri_Env
+
+$SqlCmd13 = New-Object System.Data.SqlClient.SqlCommand
+$SqlCmd13.CommandText = " 
+insert into mydb.All_Instances (InstanceNam,PortNum,DBMSVer,Instance_Pri_Env) values ('$InstanceNam','$PortNum','$DBMSVer', '$Instance_Pri_Env');
+"
+$SqlCmd13.Connection = $SqlConnectionAddA
+$SqlCmd13.CommandTimeout = 0
+$SqlAdapter13 = New-Object System.Data.SqlClient.SqlDataAdapter
+$SqlAdapter13.SelectCommand = $SqlCmd13
+$DataSet13 = New-Object System.Data.DataSet
+$SqlAdapter13.Fill($DataSet13) | Out-Null
+}
+
+
+$SqlConnectionAddA.Close()
+
+
+$ENDsysdatetime = get-date -format yyyy'-'MM'-'dd' 'HH':'mm':'ss
+"Completed at $ENDsysdatetime" | Out-File C:\PowerTemp\Qualified_Instances_Skipped_DBs.txt -append
+write-host -foregroundcolor green "Completed at $ENDsysdatetime"
+

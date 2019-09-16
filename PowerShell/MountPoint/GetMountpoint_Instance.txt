@@ -1,0 +1,169 @@
+$ErrorActionPreference = "Stop" 
+try {
+
+$outData = @("")
+$wscriptnetwork = new-object -comobject "wscript.network"
+$username = $wscriptnetwork.username
+
+$x_domain = @("")
+$x_server_name = @("")
+$x_portN = @("")
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Drawing") 
+[void] [System.Reflection.Assembly]::LoadWithPartialName("System.Windows.Forms") 
+
+$objForm = New-Object System.Windows.Forms.Form 
+$objForm.Text = "Input to obtain MountPoints"
+$objForm.Size = New-Object System.Drawing.Size(400,300) 
+$objForm.StartPosition = "CenterScreen"
+
+$objForm.KeyPreview = $True
+$objForm.Add_KeyDown({if ($_.KeyCode -eq "Enter") 
+    {$x_domain=$objTextBox1.Text;$x_server_name=$objTextBox2.Text;$x_portN=$objTextBox3.Text;$objForm.Close()}})
+$objForm.Add_KeyDown({if ($_.KeyCode -eq "Escape") 
+    {$objForm.Close()}})
+
+$objTextBox1 = New-Object System.Windows.Forms.TextBox 
+$objTextBox1.Location = New-Object System.Drawing.Size(120,40) 
+$objTextBox1.Size = New-Object System.Drawing.Size(90,80) 
+$objForm.Controls.Add($objTextBox1) 
+
+
+$objTextBox2 = New-Object System.Windows.Forms.TextBox 
+$objTextBox2.Location = New-Object System.Drawing.Size(120,80) 
+$objTextBox2.Size = New-Object System.Drawing.Size(190,80) 
+$objForm.Controls.Add($objTextBox2) 
+
+$objTextBox3 = New-Object System.Windows.Forms.TextBox 
+$objTextBox3.Location = New-Object System.Drawing.Size(120,120) 
+$objTextBox3.Size = New-Object System.Drawing.Size(90,80) 
+$objForm.Controls.Add($objTextBox3) 
+
+$OKButton = New-Object System.Windows.Forms.Button
+$OKButton.Location = New-Object System.Drawing.Size(75,210)
+$OKButton.Size = New-Object System.Drawing.Size(75,23)
+$OKButton.Text = "OK"
+$OKButton.Add_Click({$objForm.Close()})
+$objForm.Controls.Add($OKButton)
+
+$CancelButton = New-Object System.Windows.Forms.Button
+$CancelButton.Location = New-Object System.Drawing.Size(150,210)
+$CancelButton.Size = New-Object System.Drawing.Size(75,23)
+$CancelButton.Text = "Cancel"
+$CancelButton.Add_Click({$objForm.Close()})
+$objForm.Controls.Add($CancelButton)
+
+$objLabel0 = New-Object System.Windows.Forms.Label
+$objLabel0.Location = New-Object System.Drawing.Size(10,20) 
+$objLabel0.Size = New-Object System.Drawing.Size(280,20) 
+$objLabel0.Text = "Please enter the inputs and click OK:"
+$objForm.Controls.Add($objLabel0) 
+
+$objLabel1 = New-Object System.Windows.Forms.Label
+$objLabel1.Location = New-Object System.Drawing.Size(10,40) 
+$objLabel1.Size = New-Object System.Drawing.Size(80,20) 
+$objLabel1.Text = "Domain:"
+$objForm.Controls.Add($objLabel1) 
+
+
+$objLabel2 = New-Object System.Windows.Forms.Label
+$objLabel2.Location = New-Object System.Drawing.Size(10,80) 
+$objLabel2.Size = New-Object System.Drawing.Size(80,30) 
+$objLabel2.Text = "SQL Instance:"
+$objForm.Controls.Add($objLabel2) 
+
+
+$objLabel3 = New-Object System.Windows.Forms.Label
+$objLabel3.Location = New-Object System.Drawing.Size(10,120) 
+$objLabel3.Size = New-Object System.Drawing.Size(80,20) 
+$objLabel3.Text = "Port#:"
+$objForm.Controls.Add($objLabel3) 
+
+
+$checkBox1 = New-Object System.Windows.Forms.CheckBox
+$checkBox1.Location = New-Object System.Drawing.Point(10, 160)
+$checkBox1.TabIndex = 2
+$checkBox1.Text = "Add CSV"
+$objForm.Controls.Add($checkBox1) 
+
+$objForm.Topmost = $True
+
+$objForm.Add_Shown({$objForm.Activate()})
+[void] $objForm.ShowDialog()
+
+$x_domain=$objTextBox1.Text;$x_server_name=$objTextBox2.Text;$x_portN=$objTextBox3.Text;
+
+if ($x_server_name -eq "") { $msg = "server unspecified. exiting...";
+$msg;
+exit
+}
+
+if ($x_domain -eq "") {$x_domain = "prog1"}
+
+if ($x_portN -eq "") {$x_portN = "1433"}
+$InsX_port = $x_server_name+','+$x_portN
+
+[reflection.assembly]::LoadWithPartialName("Microsoft.SqlServer.Smo")|out-null
+$serverX = new-object “Microsoft.SqlServer.Management.Smo.Server” $InsX_port
+
+ if ($serverX.Settings.defaultlog.length > 0) {$DriveLetter = $serverX.Settings.defaultlog.substring(0,2)}
+ elseif($serverX.Settings.DefaultFile.length >0 ) {$DriveLetter = $serverX.Settings.DefaultFile.substring(0,2)} 
+ elseif($serverX.Information.MasterDBLogPath.length >0 ) {$DriveLetter = $serverX.Information.MasterDBLogPath.substring(0,2)} 
+ else {$DriveLetter = $serverX.Information.MasterDBPath.substring(0,2)}
+
+ if (-not $serverX.Information.Isclustered) {$DriveLetter =""}
+
+$MachineNam = $serverX.Information.ComputerNamePhysicalNetBIOS;
+$host1 = hostname
+
+write-host -fore yellow "Domain: "  $x_domain;
+write-host -fore yellow "SQL Instance: "  $InsX_port;
+write-host -fore yellow "Host Machine: "  $MachineNam;
+write-host -fore yellow "Host Local  : "  $host1;
+
+$a = "a";
+if ($a = "a") {$cred = Get-Credential $x_domain\$username};
+
+if($host1 -eq $MachineNam)
+{
+Get-WmiObject -class Win32_BIOS -ComputerName $MachineNam -ErrorAction Stop | out-null 
+}
+else
+{
+Get-WmiObject -class Win32_BIOS -ComputerName $MachineNam -Credential $cred -ErrorAction Stop | out-null 
+}
+
+$i = 1
+$aout = @()
+$dataFromServer = Get-WmiObject Win32_Volume -ComputerName $MachineNam | Select-Object SystemName,Label,Name,DriveLetter,DriveType,Capacity,Freespace
+foreach ($currline in $dataFromServer) {
+    if ((-not $currline.name.StartsWith("\\")) -and $currline.name.StartsWith($DriveLetter) -and ($currline.Drivetype -ne 5)) {
+        if ($currline.Capacity -gt 0) {[float]$tempfloat = ([long]$currline.Freespace) / ([long]$currline.Capacity)}
+        $temppercent1 = [math]::round(($tempfloat * 100),2)
+        $temppercent = "{0,8:N2}" -f $temppercent1
+        [float]$TotalSpace_GB1 = [math]::round([long]$currline.Capacity / [long]1073741824, 3) 
+        $TotalSpace_GB = "{0,12:N3}" -f $TotalSpace_GB1
+        [float]$FreeSpace_GB1 = [math]::round([long]$currline.Freespace / [long]1073741824, 3) 
+        $FreeSpace_GB = "{0,12:N3}" -f $FreeSpace_GB1
+        add-member -InputObject $currline -MemberType NoteProperty -name FreePercent -value "$temppercent %"
+        add-member -InputObject $currline -MemberType NoteProperty -name TotalSpace_GB -value "$TotalSpace_GB"
+        add-member -InputObject $currline -MemberType NoteProperty -name FreeSpace_GB -value "$FreeSpace_GB"
+        $outData = $outData + $currline
+    }
+}
+$filename = $MachineNam
+$outData | Select-Object SystemName,Label,Name,TotalSpace_GB,FreeSpace_GB,FreePercent | sort-object -property name | Out-gridView
+
+if ($checkBox1.Checked){
+$pwd1 = pwd
+write-host -fore green "In addition to the griview, a CSV file will be created as $pwd1\$filename.csv "  $x_domain;
+$outData | Select-Object SystemName,Label,Name,TotalSpace_GB,FreeSpace_GB,FreePercent | sort-object -property name | Export-Csv  .\$filename.csv -notype -Delimiter ","
+}
+
+}
+Catch { $quit = 'quitting due to error: ' 
+$ErrorMessage = $_.Exception.Message 
+$FullName = $_.Exception.GetType().FullName 
+$FailedItem = $_.Exception.ItemName 
+$quit + $FailedItem + $ErrorMessage + $FullName 
+Break }
+finally { $ErrorActionPreference = "Stop"}
