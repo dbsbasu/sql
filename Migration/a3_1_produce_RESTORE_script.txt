@@ -1,3 +1,4 @@
+-- produce restore script from db -- starts
 -- produce database restore script. as easy as 1, 2, 3...
 use [master]
 go
@@ -13,7 +14,7 @@ declare @target_instance varchar(80);
 set @target_instance = 'xxx';
 --                 your backup path and I will append target_Server\database.bak' <--- (3)
 declare @backup_device varchar(80);
-set @backup_device = '\\SQLBKUP-NonProd-1\sqlbkup01\';
+set @backup_device = 'location\';
 DECLARE @db1name varchar(80);
 declare @sqlcmd0 varchar(8000);
 declare @sqlcmd1 varchar(8000);
@@ -37,8 +38,10 @@ create table ##file_tb
 );
 
 DECLARE user_dbs CURSOR READ_ONLY FOR 
-select name from master..sysdatabases 
-where name not in ('master', 'tempdb', 'model', 'msdb', 'DBAUtils');
+select name from master.sys.databases 
+where name not in ('master', 'tempdb', 'model', 'msdb', 'DBAUtils')
+and state = 0
+order by name asc;
 OPEN user_dbs;
 FETCH NEXT FROM user_dbs INTO @db1name;
 WHILE (@@fetch_status <> -1)
@@ -115,3 +118,65 @@ DEALLOCATE user_dbs;
 IF  EXISTS (SELECT * FROM tempdb.dbo.sysobjects WHERE name = '##file_tb' AND type in (N'U'))
 DROP TABLE ##file_tb
 GO
+-- produce restore script from db -- ends
+
+-- produce restore script from backup PS -- starts
+[CmdletBinding()]
+Param(`
+  [Parameter(Mandatory=$True)] [string]$SQLInstance_Port,
+  [Parameter(Mandatory=$True)] [string]$LiveDBName,
+  [Parameter(Mandatory=$True)] [string]$Backup_Location_and_File_Name
+)
+
+# determine script location
+$myScriptLocation = Split-Path -Path $MyInvocation.MyCommand.Path # ($PSScriptRoot will also do)
+$myScriptName =  ([io.fileinfo]$MyInvocation.MyCommand.Definition).BaseName
+
+# create default log dir if not exists
+$LogDir = $myScriptLocation + "\Logs"
+if (!(Test-Path -Path $LogDir)){ New-Item -ItemType directory -Path $LogDir }
+$outputFile = "$myScriptLocation\Logs\$myScriptName" + "_output.txt"
+
+$header = Invoke-SQLcmd -ServerInstance $SQLInstance_Port -Database "msdb" -Query "restore headeronly from disk = N'$Backup_Location_and_File_Name'" 
+$filelist = Invoke-SQLcmd -ServerInstance $SQLInstance_Port -Database "msdb" -Query "restore filelistonly from disk = N'$Backup_Location_and_File_Name'" 
+
+$BakupDBName = $header.DatabaseName
+
+$LogMessage  = "-- restore script from backup file `r`n"
+$LogMessage += "USE [master] `r`n"
+$LogMessage += "GO `r`n"
+$LogMessage += "RESTORE DATABASE [$BakupDBName] `r`n"
+$LogMessage += "FROM DISK = N'$Backup_Location_and_File_Name' `r`n"
+$LogMessage += "WITH  FILE = 1, `r`n"
+foreach ($file in $filelist) {
+    $logicalfile = $file.logicalname
+    $physicalfile  = $file.physicalname
+    $LogMessage += "MOVE N'$logicalfile' TO N'$physicalfile', `r`n"
+}
+$LogMessage += "NOUNLOAD,  REPLACE,  STATS = 1 `r`n"
+$LogMessage | Out-File $outputFile 
+
+$dbfilelist = Invoke-SQLcmd -ServerInstance $SQLInstance_Port -Database $LiveDBName -Query "SELECT name as logicalFile, physical_name as physicalFile FROM sys.database_files WITH (nolock) " 
+
+$LogMessage  = "-- restore script from live database `r`n"
+$LogMessage += "USE [master] `r`n"
+$LogMessage += "GO `r`n"
+$LogMessage += "RESTORE DATABASE [$LiveDBName] `r`n"
+$LogMessage += "FROM DISK = N'$Backup_Location_and_File_Name' `r`n"
+$LogMessage += "WITH  FILE = 1, `r`n"
+foreach ($dbfile in $dbfilelist) {
+    $dblogicalfile = $dbfile.logicalFile
+    $dbphysicalfile  = $dbfile.physicalFile
+    $LogMessage += "MOVE N'$dblogicalfile' TO N'$dbphysicalfile', `r`n"
+}
+$LogMessage += "NOUNLOAD,  REPLACE,  STATS = 1 `r`n"
+$LogMessage | Out-File $outputFile -Append
+
+$LogMessage  = "`r`n`r`n/*"
+$LogMessage += "input params `r`n"
+$LogMessage += "SQLInstance Port  $SQLInstance_Port `r`n"
+$LogMessage += "Live DB Name      $LiveDBName `r`n"
+$LogMessage += "Backup File       $Backup_Location_and_File_Name `r`n"
+$LogMessage += "*/"
+$LogMessage | Out-File $outputFile -Append
+-- produce restore script from backup PS -- ends
