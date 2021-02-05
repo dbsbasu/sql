@@ -1,7 +1,7 @@
 ----database permissions
 declare @databaseNameINPUT varchar(200), @Principal_Type_Desc varchar(200), @Principal_Name varchar(200), @Target_Class_Desc varchar(200), @Target_Object varchar(200);
 
-set @databaseNameINPUT = 'msdb';
+set @databaseNameINPUT = DB_NAME();
 --set @Principal_Type_Desc = 'sql_user' 
 --set @Principal_Name = 'special'
 --set @Target_Class_Desc = 'Object :  USER_TABLE' 
@@ -162,7 +162,7 @@ if exists (select 1 from #SrcDB_Principals spr1 where spr1.filter1 = 1)
 begin -- with existenace check 
 
 /* NON-PIVOT - SCRIPTING PERMISSIONS DISPLAY STARTS */
-/* --PART A - SCRIPTING / PIVOT: comment out if you need non-pivot resultset and script-out permissions
+ --PART A - SCRIPTING / PIVOT: comment out if you need non-pivot resultset and script-out permissions
 select DBName, Grantor, Grantor_Type_Desc, Principal_Type_Desc, Principal_Name, Server_Login, Target_Class_Desc, Target_Object, Securables, Grant_State, create_date, modify_date,
 case when spr1.Principal_Type_Desc in ('SQL_USER','WINDOWS_GROUP','WINDOWS_USER') then
 'use [master]'+ char(10) + 'GO'+ char(10) + 'if not exists (select 1 from sys.server_principals where name = N'''+spr1.Server_Login+''')'+ char(10)+'   CREATE LOGIN '+quotename(spr1.Server_Login)+' FROM WINDOWS WITH DEFAULT_DATABASE=[master];'+ char(10) + 'GO'+ char(10) else '--n/a--' end as Create_Login_Script,
@@ -184,11 +184,11 @@ end as script_permissions
 from #SrcDB_Principals spr1
 where spr1.filter1 = 1
 order by DBName, role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_Desc, Target_Object;
-*/ --PART A - SCRIPTING / PIVOT: comment out if you need non-pivot resultset and script-out permissions
+ --PART A - SCRIPTING / PIVOT: comment out if you need non-pivot resultset and script-out permissions
 /* NON-PIVOT - SCRIPTING PERMISSIONS DISPLAY ENDS */
 
 /* PIVOT DISPLAY STARTS */
---/* --PART B - PIVOT: comment out if you need pivot resultset
+/* --PART B - PIVOT: comment out if you need pivot resultset
 if object_id('tempdb..#colT') is not null drop table #colT;
 create table #colT (Target_Class_Desc1  varchar(200), colName varchar(200));
 
@@ -223,11 +223,10 @@ order by DBName,  role_Xref, Principal_Type_Desc, Principal_Name, Target_Class_D
 exec sp_executesql @SQLQuery;
 set @SQLQuery = '';
 if object_id('tempdb..#colT') is not null drop table #colT;
---*/ --PART B - PIVOT: comment out if you need pivot resultset
+*/ --PART B - PIVOT: comment out if you need pivot resultset
 /* PIVOT DISPLAY ENDS */
 end -- with existenace check 
 else print 'no such permissions'
 
 if object_id('tempdb..#SrcDB_Principals') is not null drop table #SrcDB_Principals;
 go
-
