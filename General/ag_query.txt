@@ -194,3 +194,7 @@ ON drs.replica_id=arcs.replica_id
 ORDER BY name ASC
 
 --AG general query -- ends
+
+-- ag failover hist -- starts
+Get-WinEvent -ComputerName "mycomputer" -filterHashTable @{logname ='Microsoft-Windows-FailoverClustering/Operational'; id=1641}| sort TimeCreated -Descending | ft -AutoSize
+-- ag failover hist -- ends
