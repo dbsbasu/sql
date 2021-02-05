@@ -1,10 +1,38 @@
-EXEC sp_msForEachDB ' 
-if ''[?]'' in (''[master]'',''[model]'',''[msdb]'',''[tempdb]'',''[dbaUtils]'') return
-use [?]
-declare @target_instance varchar(80);
-set @target_instance = ''SCMSSd2h'';
-declare @sqltext varchar(8000)
-set @sqltext = ''BACKUP DATABASE [''+''?''+''] TO DISK = N''''\\xxx\sqlbkup01\''+@target_instance+''\Data\''+''?''+''.bak'''' WITH COMPRESSION, COPY_ONLY, NOFORMAT, NOINIT,NAME =N''''''+''?''+''-Full Database   Backup'''', SKIP, NOREWIND, NOUNLOAD,  STATS = 10'';
-print (@sqltext);
-'
+-- obtain backup info
+set transaction isolation level read uncommitted
 
+select 
+BackupFinishDate
+, SQLInstanceName, DBName
+, bkup_file
+, BackupType, CompressedBackupSizeMB, BackupSizeMB
+/*, BackupFilePath, BackupFileName*/ , BackupStartDate
+from (
+select
+ (dense_RANK() over (partition by bs.database_name order by bs.backup_start_date desc)) as rank1
+,bs.machine_name as MachineName
+,@@SERVERNAME as SQLInstanceName
+,bs.[database_name] as DBName
+,bmf.physical_device_name as bkup_file
+/*,COALESCE(substring(bmf.physical_device_name, 1, ((len(bmf.physical_device_name))-CHARINDEX(('\'), reverse(bmf.physical_device_name))+1)), bmf.physical_device_name) as BackupFilePath
+,COALESCE(substring(bmf.physical_device_name, ((len(bmf.physical_device_name))-CHARINDEX(('\'), reverse(bmf.physical_device_name))+2),(len(bmf.physical_device_name))), bmf.physical_device_name) as BackupFileName
+*/
+,bs.[type] as BackupType
+,bs.backup_start_date as BackupStartDate
+,bs.backup_finish_date as BackupFinishDate
+,cast(round((bs.Compressed_backup_size/1048576),0) as int) as CompressedBackupSizeMB
+,cast(round((bs.backup_size/1048576),0) as int) as BackupSizeMB
+from msdb.dbo.backupset as bs
+inner join sys.databases as db on db.name = bs.database_name
+and db.name not in ('master','model','msdb','dba')
+inner join msdb.dbo.backupmediafamily bmf
+on bs.media_set_id = bmf.media_set_id
+and bs.[type] in ('d')
+and bs.backup_start_date <= (select max(bs2.backup_start_date)
+						from msdb.dbo.backupset bs2  with (nolock)
+						where bs2.media_set_id = bs.media_set_id
+						and   bs2.database_name = bs.database_name
+						and   bs2.[type] = bs.[type])
+) as backup_data
+where backup_data.rank1 = 1
+order by BackupFinishDate desc
