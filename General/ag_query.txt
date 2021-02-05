@@ -1,14 +1,136 @@
-SELECT
-AGS.name AS AGGroupName, AR.replica_server_name AS InstanceName, HARS.role_desc, Db_name(DRS.database_id) AS DBName,
-DRS.database_id, DRS.is_local, DRS.database_state_desc, AR.availability_mode_desc AS SyncMode, 
-DRS.synchronization_state_desc AS SyncState, DRS.last_hardened_lsn, DRS.end_of_log_lsn, DRS.last_redone_lsn,
-DRS.last_hardened_time, DRS.last_redone_time, DRS.log_send_queue_size, DRS.redo_queue_size 
-FROM sys.dm_hadr_database_replica_states DRS
-LEFT JOIN sys.availability_replicas AR ON DRS.replica_id = AR.replica_id
-LEFT JOIN sys.availability_groups AGS  ON AR.group_id = AGS.group_id
-LEFT JOIN sys.dm_hadr_availability_replica_states HARS ON AR.group_id = HARS.group_id AND AR.replica_id = HARS.replica_id
---WHERE DRS.database_state_desc = 'ONLINE'
-ORDER BY AGS.name, AR.replica_server_name, Db_name(DRS.database_id)
+--add new db in AG - starts
+/*
+--first disable tlog backup jobs (primary / secondary - depending upon preferred backup setup)
+
+--primary
+--create database with full recovery model and take backups
+BACKUP DATABASE [smileBig] TO DISK = N'M:\SQLBackup\LAWBRBDBCL$AG_lawbrbdb\smileBig\FULL\LAWBRBDBCL$AG_lawbrbdb_smileBig_FULL_1.bak' WITH COMPRESSION, NOFORMAT, NOINIT,NAME =N'smileBig-Full Database Backup', SKIP, NOREWIND, NOUNLOAD,  STATS = 10;
+GO
+BACKUP LOG [smileBig] TO DISK = N'M:\SQLBackup\LAWBRBDBCL$AG_lawbrbdb\smileBig\Log\LAWBRBDBCL$AG_lawbrbdb_test_LOG_1.trn' ;
+GO
+
+--secondary -- copy fill and tlog backup files into secondary and restore with noreovery
+use [master]
+go
+RESTORE DATABASE [smileBig]
+ FROM DISK = N'\\lawbrbdb04\M$\SQLBackup\HOLD\AG_backups\smileBig\Full\LAWBRBDBCL$AG_lawbrbdb_smileBig_FULL_1.bak'
+ WITH  FILE = 1, 
+ MOVE N'smileBig' TO N'I:\SQLData\smileBig.mdf',
+ MOVE N'smileBig_log' TO N'L:\SQLLog\smileBig_log.ldf',
+ NOUNLOAD, norecovery, REPLACE,  STATS = 10
+GO 
+RESTORE Log [smileBig]
+ FROM DISK = N'M:\SQLBackup\HOLD\AG_backups\smileBig\Log\LAWBRBDBCL$AG_lawbrbdb_test_LOG_1.trn'
+ WITH  FILE = 1, 
+ norecovery
+GO 
+/*
+--additional tlog backup until current time
+RESTORE Log [smileBig]
+ FROM DISK = N'M:\SQLBackup\HOLD\AG_backups\smileBig\Log\LAWBRBDBCL$AG_lawbrbdb_smileBig_LOG_20201211_102351.trn'
+ WITH  FILE = 1, 
+ norecovery
+GO 
+*/
+--primary
+ALTER AVAILABILITY GROUP AG_lawbrbdb ADD DATABASE smileBig;
+
+--secondary
+ALTER DATABASE smileBig SET HADR AVAILABILITY GROUP = AG_lawbrbdb;
+
+--re-enable tlog backup jobs
+
+--note if tlog backup is enabled before setting HADR and thus a tlog backup is taken then you cannot set HADR (data sync). since the log pointer has not been roll forwarded. in that case manually apply the tlog backup to bring it to current and then set HADR
+
+*/
+--add new db in AG - ends
+
+--AG general query -- starts
+
+
+--ag group replica related
+select 
+ instance.instance_name
+,map.ag_name
+,replicas.replica_server_name
+,case when group_states.primary_replica = replicas.replica_server_name
+    then 'PRIMARY'
+else replica_states.role_desc
+end as role_desc
+,replicas.availability_mode_desc
+,replicas.failover_mode_desc
+,replica_states.synchronization_health_desc as synchronization_health_desc
+,replica_states.recovery_health_desc
+,replica_states.operational_state_desc
+,replica_states.connected_state_desc
+,replicas.session_timeout 
+,replicas.primary_role_allow_connections_desc
+,replicas.secondary_role_allow_connections_desc
+,replicas.create_date
+,replicas.modify_date
+,replicas.backup_priority
+,replicas.read_only_routing_url
+--,replicas.seeding_mode_desc
+from sys.availability_replicas as replicas
+inner join sys.availability_groups_cluster cluster
+on cluster.group_id = replicas.group_id
+inner join sys.dm_hadr_name_id_map as map on map.ag_id = replicas.group_id
+inner join sys.dm_hadr_availability_replica_cluster_nodes as nodes
+on nodes.group_name = cluster.name
+and nodes.replica_server_name = replicas.replica_server_name
+inner join sys.dm_hadr_instance_node_map as instance 
+on instance.node_name = nodes.node_name
+left outer join sys.dm_hadr_availability_group_states as group_states 
+on group_states.group_id = replicas.group_id
+and group_states.primary_replica = replicas.replica_server_name
+left outer join sys.dm_hadr_availability_replica_states as replica_states
+on replica_states.group_id = replicas.group_id
+and replica_states.replica_id = replicas.replica_id
+
+
+-- ag database related
+select replicas.replica_server_name, db_clusters.database_name
+,db.log_reuse_wait_desc
+,db_replica_states.is_local
+,db_replica_states.synchronization_state_desc
+,db_replica_states.is_commit_participant
+,db_replica_states.synchronization_health_desc
+,db_replica_states.database_state_desc
+,db_replica_states.is_suspended
+,db_replica_states.suspend_reason_desc
+,db_cluster_states.is_failover_ready
+,db_cluster_states.is_pending_secondary_suspend
+,db_cluster_states.is_database_joined
+,db_replica_states.last_sent_time
+,db_replica_states.last_received_time
+,db_replica_states.last_hardened_time
+,db_replica_states.last_redone_time
+,db_replica_states.log_send_queue_size
+,db_replica_states.log_send_rate
+,db_replica_states.redo_queue_size
+,db_replica_states.redo_rate
+,db_replica_states.last_commit_time
+from sys.availability_replicas as replicas 
+inner join sys.availability_databases_cluster as db_clusters
+on replicas.group_id = db_clusters.group_id
+inner join sys.databases as db
+on db.name = db_clusters.database_name
+--and db.group_database_id = db_clusters.group_database_id
+left outer join sys.dm_hadr_database_replica_cluster_states as db_cluster_states
+on db_cluster_states.database_name = db_clusters.database_name
+and db_cluster_states.replica_id = replicas.replica_id
+left outer join sys.dm_hadr_database_replica_states as db_replica_states
+on db_replica_states.group_id = db_clusters.group_id
+and db_replica_states.group_database_id = db_clusters.group_database_id
+and db_replica_states.replica_id = replicas.replica_id
+order by replicas.replica_server_name, db_clusters.database_name
+
+
+
+
+
+------------------------------- below needs clean up / refine -------
+
 
 --Monitoring the Always On Availability Groups Feature on a Server Instance
 select SERVERPROPERTY('IsHadrEnabled') as IsHadrEnabled, SERVERPROPERTY('HadrManagerStatus') as HadrManagerStatus
@@ -45,7 +167,24 @@ select * from sys.availability_group_listener_ip_addresses
 select * from sys.availability_group_listeners
 select * from sys.dm_tcp_listener_states
 
---redo que -- how far behind?
+
+
+
+--discard below query
+SELECT
+AGS.name AS AGGroupName, AR.replica_server_name AS InstanceName, HARS.role_desc, Db_name(DRS.database_id) AS DBName,
+DRS.database_id, DRS.is_local, DRS.database_state_desc, AR.availability_mode_desc AS SyncMode, 
+DRS.synchronization_state_desc AS SyncState, DRS.last_hardened_lsn, DRS.end_of_log_lsn, DRS.last_redone_lsn,
+DRS.last_hardened_time, DRS.last_redone_time, DRS.log_send_queue_size, DRS.redo_queue_size 
+FROM sys.dm_hadr_database_replica_states DRS
+LEFT JOIN sys.availability_replicas AR ON DRS.replica_id = AR.replica_id
+LEFT JOIN sys.availability_groups AGS  ON AR.group_id = AGS.group_id
+LEFT JOIN sys.dm_hadr_availability_replica_states HARS ON AR.group_id = HARS.group_id AND AR.replica_id = HARS.replica_id
+--WHERE DRS.database_state_desc = 'ONLINE'
+ORDER BY AGS.name, AR.replica_server_name, Db_name(DRS.database_id)
+
+
+--discard below query - redo que -- how far behind?
 SELECT arcs.replica_server_name, d.name, d.log_reuse_wait_desc, drs.log_send_queue_size,drs.redo_queue_size
 FROM master.sys.databases d
 INNER JOIN master.sys.dm_hadr_database_replica_states drs
@@ -54,3 +193,4 @@ INNER JOIN master.sys.dm_hadr_availability_replica_cluster_states arcs
 ON drs.replica_id=arcs.replica_id
 ORDER BY name ASC
 
+--AG general query -- ends
