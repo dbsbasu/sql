@@ -1,3 +1,53 @@
+-- table / index size 2016 starts
+drop table if exists #t1
+--table / index size and row counts
+select 
+  object_schema_name(ps.object_id) as schemaName
+, object_name(ps.object_id) as objectName
+, REPLACE(CONVERT(VARCHAR,CONVERT(MONEY,sum(row_count)),1), '.00','') AS Row_Count
+, coalesce(ix.name, 'heap') as indexName 
+, ix.type_desc as IndexType 
+, convert(decimal(12,3),round(sum(reserved_page_count)*8.0/(1024.0*1024.0),3)) as total_pages_GB
+, sum(reserved_page_count) as total_Pages
+, sum(in_row_reserved_page_count) as in_row_Pages
+, sum(lob_reserved_page_count) as lob_Pages
+, sum(row_overflow_reserved_page_count) as overflow_Pages
+into #t1
+from sys.dm_db_partition_stats ps
+left outer join sys.indexes ix on ix.object_id = ps.object_id  and ix.index_id = ps.index_id
+where object_schema_name(ps.object_id) <> 'sys'
+-- and ps.object_id in (object_id('table_name'))
+group by object_schema_name(ps.object_id), object_name(ps.object_id), ps.index_id, ix.name,ix.type_desc
+order by object_schema_name(ps.object_id), object_name(ps.object_id), ps.index_id, ix.name
+
+--table size
+select 
+  schemaName
+, objectName
+, Row_Count
+, sum(total_pages_GB) as table_pages_GB
+, sum(total_Pages) as table_pages
+from #t1
+group by schemaName, objectName, Row_Count
+order by schemaName, objectName
+
+--table / index-type size
+select 
+  schemaName
+, objectName
+, IndexType
+, Row_Count
+, sum(total_pages_GB) as total_pages_GB
+, sum(total_Pages) as total_pages
+from #t1
+group by schemaName, objectName, Row_Count, IndexType
+order by schemaName, objectName, IndexType
+
+--table / index line item
+select * from #t1
+
+-- table / index size 2016 ends
+
 --table szie (either clustered or heap)
 select 
 sc.name+'.'+ob.name as tableName
