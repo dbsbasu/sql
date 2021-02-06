@@ -1,7 +1,7 @@
 
 /*
 create table dbo.test1 (id tinyint identity(1,1), name varchar(20) null)
-insert into dbo.test1 (name) values ('basu')
+insert into dbo.test1 (name) values ('jon')
 select * from dbo.test1
 --alter table dbo.test1 alter column name varchar(16) not null
 --alter table dbo.test1 rebuild
