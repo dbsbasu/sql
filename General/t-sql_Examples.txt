@@ -5,8 +5,8 @@ INSERT INTO dbo.Employees
            ,FirstName)
 output inserted.employeeid, inserted.LastName, inserted.FirstName
      VALUES
-           ('Basu'
-           ,'Debasis')
+           ('normal'
+           ,'general')
 
 
 select scope_identity()
